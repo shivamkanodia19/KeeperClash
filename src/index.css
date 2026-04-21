@@ -1,0 +1,101 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0a1228;
+  color: #f7fbff;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  margin: 0 auto;
+  width: min(1000px, 100%);
+  padding: 1rem;
+}
+
+.hud {
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.hud h1 {
+  margin: 0.25rem 0 0.4rem;
+  font-size: clamp(1.8rem, 3.4vw, 2.4rem);
+}
+
+.hud p {
+  margin: 0.2rem 0;
+}
+
+.hud .mode {
+  color: #9fd9ff;
+  font-size: 0.95rem;
+}
+
+.hud .error {
+  color: #ff8a8a;
+  font-weight: 600;
+}
+
+.game-wrap {
+  position: relative;
+}
+
+.game-canvas {
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+}
+
+.video-feed {
+  position: absolute;
+  right: 0.8rem;
+  bottom: 0.8rem;
+  width: 160px;
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  opacity: 0.55;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 0.3rem;
+  text-align: center;
+  background: rgba(2, 6, 18, 0.8);
+  backdrop-filter: blur(2px);
+}
+
+.overlay h2 {
+  margin: 0 0 0.4rem;
+  font-size: 2rem;
+}
+
+.overlay p {
+  margin: 0.1rem 0;
+}
+
+.overlay button {
+  margin-top: 0.9rem;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  border: 0;
+  background: #31d68f;
+  color: #042318;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.overlay button:hover {
+  filter: brightness(1.06);
+}
