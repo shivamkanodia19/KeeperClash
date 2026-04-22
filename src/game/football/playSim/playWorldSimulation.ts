@@ -269,19 +269,26 @@ function applyDefenseAssignments(players: SimPlayer[], defenseCallId: string): S
     if (p.unit !== 'defense') return p
     const slot = slotKeyFromId(p.id)
     let assignment = defenseAssignmentLabel(defenseCallId, p.role, slot)
+    let assignmentTargetId: string | null = null
     if (defenseCallId === 'cover_1_man' && p.role === 'CB') {
       const idx = players.filter((x) => x.unit === 'defense' && x.role === 'CB').indexOf(p)
       const wr = wrs[idx % Math.max(1, wrs.length)]
-      if (wr) assignment = `mirror:${wr.id}`
+      if (wr) {
+        assignment = `mirror:${wr.id}`
+        assignmentTargetId = wr.id
+      }
     }
     if (defenseCallId === 'cover_2_zone' && p.role === 'S') {
       assignment = p.y >= 0 ? 'deep_r' : 'deep_l'
     }
     if (defenseCallId === 'run_blitz' && (p.role === 'LB' || p.role === 'DL')) {
       const anchor = rbs[0] ?? qb
-      if (anchor) assignment = `blitz:${anchor.id}`
+      if (anchor) {
+        assignment = `blitz:${anchor.id}`
+        assignmentTargetId = anchor.id
+      }
     }
-    return { ...p, assignment }
+    return { ...p, assignment, assignmentTargetId }
   })
 }
 
@@ -843,8 +850,8 @@ export function stepPlayWorld(
     const { vx, vy, facingRad } = integrateVelocity(p, dx, dy, dt, maxMul)
     let x = p.x + vx * dt
     let y = p.y + vy * dt
-    x = clamp(x, 1, 99)
-    y = clamp(y, -26, 26)
+    x = clamp(x, PLAY_FEEL.player.minFieldX, PLAY_FEEL.player.maxFieldX)
+    y = clamp(y, -PLAY_FEEL.player.maxFieldY, PLAY_FEEL.player.maxFieldY)
     return { ...p, vx, vy, facingRad, x, y }
   })
 

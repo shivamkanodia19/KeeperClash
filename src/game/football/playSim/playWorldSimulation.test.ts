@@ -110,6 +110,10 @@ describe('playWorldSimulation', () => {
       resolution,
     })
     const startX = world.ball.x
+    const defenderId = world.players.find((p) => p.unit === 'defense')?.id ?? null
+    expect(defenderId).not.toBeNull()
+    const defenderStart = world.players.find((p) => p.id === defenderId)
+    expect(defenderStart).toBeDefined()
 
     for (let i = 0; i < 60; i++) {
       world = stepPlayWorld(world, SUBSTEP_DT, { carrierSteer: 0 }, resolution)
@@ -117,6 +121,14 @@ describe('playWorldSimulation', () => {
 
     expect(world.ball.x - startX).toBeGreaterThan(0.75)
     expect(world.ball.x - startX).toBeLessThan(7)
+    expect(world.finished).toBe(true)
+    expect(world.time).toBeGreaterThan(0.5)
+    expect(world.time).toBeLessThan(1)
+    const defenderEnd = world.players.find((p) => p.id === defenderId)
+    expect(defenderEnd).toBeDefined()
+    expect(
+      Math.hypot(defenderEnd!.x - defenderStart!.x, defenderEnd!.y - defenderStart!.y),
+    ).toBeGreaterThan(1)
   })
 
   it('active ball carrier input creates a different lateral lane', () => {
@@ -166,5 +178,52 @@ describe('playWorldSimulation', () => {
     }
 
     expect(right.ball.y - left.ball.y).toBeGreaterThan(3)
+  })
+
+  it('runtime timers tick down each frame', () => {
+    const engine = createTestScrimmageState()
+    const rng = createSeededRng(17)
+    const { resolution, committedPlayIds } = advanceDrive(
+      engine,
+      { userOffensePlayId: 'quick_slants' },
+      rng,
+    )
+    const off = getOffensivePlay('quick_slants')!
+    const def = getDefensiveCall(committedPlayIds.defenseCallId)
+    const { players, ball } = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      def?.visualTemplateId ?? 'four_three_base',
+    )
+    const world = createPlayWorldFromSnap({
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: resolution.yardsGained,
+      offensePlayId: 'quick_slants',
+      defenseCallId: committedPlayIds.defenseCallId,
+      layoutPlayers: players,
+      ball,
+      resolution,
+    })
+    const seeded = {
+      ...world,
+      players: world.players.map((p, index) =>
+        index === 0
+          ? {
+              ...p,
+              actionCooldown: 0.3,
+              tackleIntentTimer: 0.2,
+              shedBoostTimer: 0.1,
+            }
+          : p,
+      ),
+    }
+
+    const next = stepPlayWorld(seeded, SUBSTEP_DT, { carrierSteer: 0 }, resolution)
+    const updated = next.players[0]
+    expect(updated.actionCooldown).toBeCloseTo(0.3 - SUBSTEP_DT, 6)
+    expect(updated.tackleIntentTimer).toBeCloseTo(0.2 - SUBSTEP_DT, 6)
+    expect(updated.shedBoostTimer).toBeCloseTo(0.1 - SUBSTEP_DT, 6)
   })
 })
