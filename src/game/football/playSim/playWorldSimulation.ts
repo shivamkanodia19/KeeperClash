@@ -310,8 +310,8 @@ export function createPlayWorldFromSnap(p: CreatePlayWorldParams): PlayWorldSimu
 
   const isPass = category === 'pass'
   let carrierId = qbId
-  let ballMode: BallSimState['mode'] = 'carried'
-  let passStage: PassSimStage = 'qbCarry'
+  const ballMode: BallSimState['mode'] = 'carried'
+  const passStage: PassSimStage = 'qbCarry'
 
   if (!isPass && rbId) {
     carrierId = rbId

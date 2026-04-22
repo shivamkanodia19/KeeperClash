@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { advanceDrive, createLiveStateAfterOpeningKickoff } from '../footballState'
 import type { FootballGameState } from '../footballTypes'
 import {
   advanceResult,
+  advancePlaySimulationFrame,
   createPlayAnimationCore,
   dive,
   idlePlayAnimationSnapshot,
@@ -75,6 +76,52 @@ export function useFootballGame(
   const [lastPlaySummary, setLastPlaySummary] = useState<string | null>(null)
   const [offensePick, setOffensePick] = useState<string | null>(DEFAULT_OFFENSE_ID)
   const [defensePick, setDefensePick] = useState<string | null>(DEFAULT_DEFENSE_ID)
+  const frameRef = useRef<number | null>(null)
+  const lastFrameAtRef = useRef<number | null>(null)
+
+  const worldActive =
+    Boolean(animCore?.world) &&
+    (animCore?.phase === 'snap' || animCore?.phase === 'playInProgress')
+
+  useEffect(() => {
+    if (!worldActive) {
+      if (frameRef.current != null) {
+        cancelAnimationFrame(frameRef.current)
+        frameRef.current = null
+      }
+      lastFrameAtRef.current = null
+      return
+    }
+
+    lastFrameAtRef.current = performance.now()
+
+    const tick = (now: number) => {
+      const prev = lastFrameAtRef.current ?? now
+      const dtMs = now - prev
+      lastFrameAtRef.current = now
+
+      setAnimCore((current) => {
+        if (
+          !current?.world ||
+          (current.phase !== 'snap' && current.phase !== 'playInProgress')
+        ) {
+          return current
+        }
+        return advancePlaySimulationFrame(current, dtMs) ?? current
+      })
+
+      frameRef.current = requestAnimationFrame(tick)
+    }
+
+    frameRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (frameRef.current != null) {
+        cancelAnimationFrame(frameRef.current)
+        frameRef.current = null
+      }
+      lastFrameAtRef.current = null
+    }
+  }, [worldActive])
 
   const startGame = useCallback(() => {
     const e = createLiveStateAfterOpeningKickoff(openingKickoffParams(userTeamId))
