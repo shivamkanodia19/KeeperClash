@@ -76,5 +76,5 @@ export type CameraRecommendation = {
   visibleYMin: number
   visibleYMax: number
   /** Camera behavior hint for renderers. */
-  focusMode: 'los_wide' | 'ball_follow' | 'full_field' | 'full_field_live'
+  focusMode: 'los_wide' | 'ball_follow' | 'full_field' | 'full_field_live' | 'tactical_full'
 }
