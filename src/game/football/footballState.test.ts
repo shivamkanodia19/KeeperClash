@@ -190,6 +190,22 @@ describe('applyRealtimeClock', () => {
     expect(tick.lastClockEvent).toMatch(/Play clock expired/)
   })
 
+  it('play clock expiration is explicit and does not silently advance the play', () => {
+    const state = {
+      ...createTestScrimmageState(),
+      playClockSeconds: 0.1,
+      clockMode: 'pre_snap_stopped' as const,
+    }
+
+    const next = applyRealtimeClock(state, 0.2, 'pre_snap_stopped')
+
+    expect(next.playClockSeconds).toBe(0)
+    expect(next.lastClockEvent).toBe('Play clock expired.')
+    expect(next.sessionPhase).toBe('play_calling')
+    expect(next.down).toBe(state.down)
+    expect(next.yardLine).toBe(state.yardLine)
+  })
+
   it('Q4 real-time expiration ends the game', () => {
     const s: FootballGameState = {
       ...createTestScrimmageState(),

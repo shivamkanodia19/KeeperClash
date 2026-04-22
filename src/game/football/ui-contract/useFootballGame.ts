@@ -5,6 +5,7 @@ import {
   applyResolvedPlay,
   createLiveStateAfterOpeningKickoff,
 } from '../footballState'
+import { DEFAULT_PLAY_CLOCK_SECONDS } from '../footballTypes'
 import type { FootballGameState } from '../footballTypes'
 import {
   createPlayAnimationCore,
@@ -217,6 +218,17 @@ export function useFootballGame(
 
   const runPlay = useCallback(() => {
     if (!engine || !animCore || animCore.phase !== 'preSnap') return
+    if (engine.playClockSeconds <= 0) {
+      const next = {
+        ...engine,
+        playClockSeconds: DEFAULT_PLAY_CLOCK_SECONDS,
+        lastClockEvent: 'Delay of game handled.',
+      }
+      engineRef.current = next
+      setEngine(next)
+      setLastPlaySummary('Delay of game. Resetting play clock.')
+      return
+    }
     const offId = offensePick ?? DEFAULT_OFFENSE_ID
     const defId = defensePick ?? DEFAULT_DEFENSE_ID
     if (!isValidPlayId(offId) || !isValidDefenseId(defId)) return
@@ -241,6 +253,17 @@ export function useFootballGame(
 
   const snapAction = useCallback(() => {
     if (!engine || !animCore) return
+    if (engine.playClockSeconds <= 0) {
+      const next = {
+        ...engine,
+        playClockSeconds: DEFAULT_PLAY_CLOCK_SECONDS,
+        lastClockEvent: 'Delay of game handled.',
+      }
+      engineRef.current = next
+      setEngine(next)
+      setLastPlaySummary('Delay of game. Resetting play clock.')
+      return
+    }
     const offId = offensePick ?? DEFAULT_OFFENSE_ID
     const defId = defensePick ?? DEFAULT_DEFENSE_ID
     if (!isValidPlayId(offId) || !isValidDefenseId(defId)) return
