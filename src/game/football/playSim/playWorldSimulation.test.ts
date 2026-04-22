@@ -226,4 +226,65 @@ describe('playWorldSimulation', () => {
     expect(updated.tackleIntentTimer).toBeCloseTo(0.2 - SUBSTEP_DT, 6)
     expect(updated.shedBoostTimer).toBeCloseTo(0.1 - SUBSTEP_DT, 6)
   })
+
+  it('targeted defensive assignments populate assignmentTargetId', () => {
+    const engine = createTestScrimmageState()
+    const rng = createSeededRng(18)
+    const { resolution } = advanceDrive(engine, { userOffensePlayId: 'inside_zone' }, rng)
+    const off = getOffensivePlay('inside_zone')!
+    const setup = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      'four_three_base',
+    )
+    const world = createPlayWorldFromSnap({
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: resolution.yardsGained,
+      offensePlayId: 'inside_zone',
+      defenseCallId: 'run_blitz',
+      layoutPlayers: setup.players,
+      ball: setup.ball,
+      resolution,
+    })
+
+    const targeted = world.players.find(
+      (p) => p.unit === 'defense' && p.assignmentTargetId !== null,
+    )
+    expect(targeted).toBeDefined()
+    expect(targeted?.assignment).toMatch(/^blitz:/)
+    expect(targeted?.assignmentTargetId).not.toBeNull()
+    expect(world.players.some((p) => p.assignmentTargetId !== null)).toBe(true)
+  })
+
+  it('lastWhistleReason starts null and stays on the world state', () => {
+    const engine = createTestScrimmageState()
+    const rng = createSeededRng(19)
+    const { resolution } = advanceDrive(engine, { userOffensePlayId: 'quick_slants' }, rng)
+    const off = getOffensivePlay('quick_slants')!
+    const setup = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      'four_three_base',
+    )
+    const world = createPlayWorldFromSnap({
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: resolution.yardsGained,
+      offensePlayId: 'quick_slants',
+      defenseCallId: 'cover_2_zone',
+      layoutPlayers: setup.players,
+      ball: setup.ball,
+      resolution,
+    })
+
+    expect(world.lastWhistleReason).toBeNull()
+    expect(world).toHaveProperty('lastWhistleReason')
+
+    const next = stepPlayWorld(world, SUBSTEP_DT, { carrierSteer: 0 }, resolution)
+    expect(next.lastWhistleReason).toBeNull()
+    expect(next).toHaveProperty('lastWhistleReason')
+  })
 })
