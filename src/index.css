@@ -55,6 +55,10 @@ button {
   background: #05070d;
 }
 
+.gb-shell:focus {
+  outline: none;
+}
+
 .gb-title {
   min-height: 100vh;
   position: relative;
@@ -625,7 +629,8 @@ button {
   cursor: default;
 }
 
-.gb-player:disabled {
+.gb-player:disabled,
+.gb-player[aria-disabled="true"] {
   opacity: 1;
 }
 
@@ -1034,6 +1039,8 @@ button {
   grid-template-columns: repeat(3, 46px);
   grid-template-rows: repeat(3, 34px);
   gap: 0.3rem;
+  touch-action: none;
+  user-select: none;
 }
 
 .gb-dpad button {
@@ -1042,6 +1049,7 @@ button {
   background: var(--cream);
   color: #111;
   font-weight: 900;
+  touch-action: none;
 }
 
 .gb-dpad__up {

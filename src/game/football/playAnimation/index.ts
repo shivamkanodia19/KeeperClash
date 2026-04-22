@@ -16,6 +16,7 @@ export {
   animationSeed,
   createPlayAnimationCore,
   derivePlayAnimationLegal,
+  deriveLivePlayResolution,
   dive,
   juke,
   moveBallCarrier,

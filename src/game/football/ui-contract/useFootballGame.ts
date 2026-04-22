@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { advanceGameFrame } from '../gameFrame'
-import { advanceDrive, createLiveStateAfterOpeningKickoff } from '../footballState'
+import {
+  advanceDrive,
+  applyResolvedPlay,
+  createLiveStateAfterOpeningKickoff,
+} from '../footballState'
 import type { FootballGameState } from '../footballTypes'
 import {
   createPlayAnimationCore,
   advanceResult,
+  deriveLivePlayResolution,
   dive,
   idlePlayAnimationSnapshot,
   juke,
@@ -55,6 +60,40 @@ function openingKickoffParams(userTeamId: FootballTeamSide) {
     receivingTeam: userTeamId === 'home' ? ('away' as const) : ('home' as const),
     userControlledTeam: userTeamId,
     openingKickIsHome: userTeamId === 'home',
+  }
+}
+
+export function commitLivePlayResult(
+  engine: FootballGameState,
+  animCore: PlayAnimationCore,
+): {
+  applied: FootballGameState
+  resultCore: PlayAnimationCore
+  summary: string | null
+} | null {
+  if (animCore.phase !== 'tackleOrScore' || !animCore.pendingNext) return null
+  const liveResolution = deriveLivePlayResolution(animCore) ?? animCore.pendingResolution
+  const resolvedNext =
+    liveResolution != null
+      ? applyResolvedPlay(engine, liveResolution, Math.random)
+      : animCore.pendingNext
+  const applied: FootballGameState = {
+    ...resolvedNext,
+    quarter: engine.quarter,
+    clockSeconds: engine.clockSeconds,
+    gameOver: engine.gameOver,
+    sessionPhase: engine.gameOver ? 'game_over' : resolvedNext.sessionPhase,
+    clockRunning: engine.gameOver ? false : resolvedNext.clockRunning,
+    clockMode: engine.gameOver ? 'stopped' : resolvedNext.clockMode,
+    lastClockEvent: engine.gameOver ? engine.lastClockEvent : resolvedNext.lastClockEvent,
+  }
+  return {
+    applied,
+    resultCore:
+      liveResolution != null
+        ? { ...animCore, pendingResolution: liveResolution, pendingNext: applied }
+        : animCore,
+    summary: liveResolution?.commentary ?? null,
   }
 }
 
@@ -209,7 +248,13 @@ export function useFootballGame(
     if (out) {
       const nextCore =
         engine.possession !== userTeamId
-          ? (switchActivePlayer(out.core, undefined, 'defense') ?? out.core)
+          ? (switchActivePlayer(
+              out.core,
+              animCore.activePlayerId ?? undefined,
+              'defense',
+            ) ??
+            switchActivePlayer(out.core, undefined, 'defense') ??
+            out.core)
           : out.core
       animCoreRef.current = nextCore
       setAnimCore(nextCore)
@@ -310,22 +355,13 @@ export function useFootballGame(
   const advanceResultAction = useCallback(() => {
     if (!animCore || !engine) return
     if (animCore.phase === 'tackleOrScore' && animCore.pendingNext) {
-      const applied: FootballGameState = {
-        ...animCore.pendingNext,
-        quarter: engine.quarter,
-        clockSeconds: engine.clockSeconds,
-        gameOver: engine.gameOver,
-        sessionPhase: engine.gameOver ? 'game_over' : animCore.pendingNext.sessionPhase,
-        clockRunning: engine.gameOver ? false : animCore.pendingNext.clockRunning,
-        clockMode: engine.gameOver ? 'stopped' : animCore.pendingNext.clockMode,
-        lastClockEvent: engine.gameOver
-          ? engine.lastClockEvent
-          : animCore.pendingNext.lastClockEvent,
-      }
+      const committed = commitLivePlayResult(engine, animCore)
+      if (!committed) return
+      const { applied, resultCore, summary } = committed
       setEngine(applied)
       engineRef.current = applied
-      setLastPlaySummary(animCore.pendingResolution?.commentary ?? null)
-      const nu = advanceResult(animCore, applied)
+      setLastPlaySummary(summary)
+      const nu = advanceResult(resultCore, applied)
       if (nu) {
         animCoreRef.current = nu
         setAnimCore(nu)

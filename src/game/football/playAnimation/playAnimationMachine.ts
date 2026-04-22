@@ -627,6 +627,75 @@ export function switchActivePlayer(
   return { ...core, activePlayerId: nextId }
 }
 
+function dynamicCommentary(base: PlayResolution, yards: number, outcome: PlayResolution['outcome']): string {
+  if (outcome === 'touchdown') return 'Touchdown!'
+  if (outcome === 'interception') return 'Intercepted!'
+  if (outcome === 'incomplete') return 'Incomplete pass.'
+  if (outcome === 'sack') return `Sack for ${Math.abs(yards)} yards.`
+  if (yards >= 10) return `User-controlled play gains ${yards} yards.`
+  if (yards > 0) return `Play gains ${yards} yards.`
+  if (yards === 0) return 'Stuffed at the line.'
+  if (base.outcome === 'sack') return `Sack for ${Math.abs(yards)} yards.`
+  return `Play loses ${Math.abs(yards)} yards.`
+}
+
+export function deriveLivePlayResolution(core: PlayAnimationCore): PlayResolution | null {
+  const base = core.pendingResolution
+  if (!base) return null
+  if (
+    base.outcome === 'field_goal_made' ||
+    base.outcome === 'field_goal_miss' ||
+    base.outcome === 'punt' ||
+    base.outcome === 'fumble_lost' ||
+    base.outcome === 'turnover_on_downs'
+  ) {
+    return base
+  }
+
+  const carrier = core.ball.carrierId
+    ? core.players.find((p) => p.id === core.ball.carrierId)
+    : null
+  if (carrier?.unit === 'defense') {
+    return {
+      ...base,
+      outcome: 'interception',
+      yardsGained: Math.round(core.ball.x - core.yardLineAtSnap),
+      commentary: dynamicCommentary(base, 0, 'interception'),
+    }
+  }
+
+  if (!carrier && core.ball.mode === 'dead') {
+    if (base.outcome === 'sack') {
+      return {
+        ...base,
+        outcome: 'sack',
+        commentary: dynamicCommentary(base, base.yardsGained, 'sack'),
+      }
+    }
+    return {
+      ...base,
+      outcome: 'incomplete',
+      yardsGained: 0,
+      commentary: dynamicCommentary(base, 0, 'incomplete'),
+    }
+  }
+
+  const yards = Math.round(core.ball.x - core.yardLineAtSnap)
+  const outcome =
+    core.ball.x >= 100 && carrier?.unit === 'offense'
+      ? 'touchdown'
+      : base.outcome === 'sack' && yards <= 0
+        ? 'sack'
+        : 'normal'
+
+  return {
+    ...base,
+    outcome,
+    yardsGained: yards,
+    commentary: dynamicCommentary(base, yards, outcome),
+  }
+}
+
 /**
  * Advance the play-world sim by wall-clock `dtMs` (for rAF loops). No-op if no active world.
  */
@@ -640,11 +709,12 @@ export function advancePlaySimulationFrame(
   let w = core.world
   const res = core.pendingResolution
   const dtSec = Math.min(0.16, (Math.max(0, dtMs) / 1000) * PLAYBACK_TIME_SCALE)
-  let acc = 0
-  while (acc + SUBSTEP_DT <= dtSec + 1e-9) {
+  let remaining = dtSec
+  while (remaining > 1e-6) {
+    const step = Math.min(SUBSTEP_DT, remaining)
     w = stepPlayWorld(
       w,
-      SUBSTEP_DT,
+      step,
       {
         carrierSteer: core.carrierSteerInput,
         moveX: core.moveInputX,
@@ -653,7 +723,7 @@ export function advancePlaySimulationFrame(
       },
       res,
     )
-    acc += SUBSTEP_DT
+    remaining -= step
     if (w.finished) break
   }
   const { players, ball, animatedYards } = syncWorldToField(w)
@@ -800,7 +870,7 @@ export function juke(core: PlayAnimationCore): PlayAnimationCore | null {
 }
 
 export function dive(core: PlayAnimationCore): PlayAnimationCore | null {
-  if (core.phase !== 'playInProgress') return null
+  if (core.phase !== 'snap' && core.phase !== 'playInProgress') return null
   if (core.world) {
     const world = core.world
     const active = world.players.find((p) => p.id === core.activePlayerId)

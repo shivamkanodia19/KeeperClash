@@ -5,6 +5,7 @@ import {
   advanceResult,
   animationSeed,
   createPlayAnimationCore,
+  deriveLivePlayResolution,
   moveBallCarrier,
   setPlayerMoveVector,
   snap,
@@ -64,6 +65,23 @@ describe('playAnimationMachine', () => {
     expect(moved).not.toBeNull()
     expect(moved!.activePlayerId).toBe(moved!.ball.carrierId)
     expect(moved!.ball.y).toBeGreaterThan(startY)
+  })
+
+  it('live frame loop advances under normal 60fps frame deltas', () => {
+    const engine = createTestScrimmageState()
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'inside_zone', 'cover_2_zone')
+    expect(s0).not.toBeNull()
+    core = setPlayerMoveVector(s0!.core, 0, 1)
+    const startY = core.world?.ball.y ?? core.ball.y
+
+    for (let i = 0; i < 12; i++) {
+      const next = advancePlaySimulationFrame(core, 16)
+      expect(next).not.toBeNull()
+      core = next!
+    }
+
+    expect(core.ball.y).toBeGreaterThan(startY)
   })
 
   it('pass play switchPlayer changes throw target while QB keeps control until catch transfer', () => {
@@ -127,5 +145,60 @@ describe('playAnimationMachine', () => {
     expect(moved).not.toBeNull()
     expect(moved!.activePlayerId).toBe('home_cb1')
     expect(moved!.players.find((p) => p.id === 'home_cb1')!.y).toBeGreaterThan(startY)
+  })
+
+  it('live play resolution uses the controlled field result instead of the snap script', () => {
+    const engine = createTestScrimmageState()
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'inside_zone', 'cover_2_zone')
+    expect(s0).not.toBeNull()
+    core = {
+      ...s0!.core,
+      phase: 'tackleOrScore',
+      pendingResolution: {
+        ...s0!.core.pendingResolution!,
+        yardsGained: 12,
+        commentary: 'Scripted gain.',
+      },
+      ball: {
+        ...s0!.core.ball,
+        x: s0!.core.yardLineAtSnap + 2,
+        y: s0!.core.ball.y,
+      },
+    }
+
+    const dynamic = deriveLivePlayResolution(core)
+    expect(dynamic).not.toBeNull()
+    expect(dynamic!.outcome).toBe('normal')
+    expect(dynamic!.yardsGained).toBe(2)
+    expect(dynamic!.yardsGained).not.toBe(core.pendingResolution!.yardsGained)
+  })
+
+  it('live play resolution preserves sacks when the ball is dead without a carrier', () => {
+    const engine = createTestScrimmageState()
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'quick_slants', 'cover_0_blitz')
+    expect(s0).not.toBeNull()
+    core = {
+      ...s0!.core,
+      phase: 'tackleOrScore',
+      pendingResolution: {
+        ...s0!.core.pendingResolution!,
+        outcome: 'sack',
+        yardsGained: -6,
+        commentary: 'Scripted sack.',
+      },
+      ball: {
+        ...s0!.core.ball,
+        mode: 'dead',
+        carrierId: null,
+        x: s0!.core.yardLineAtSnap - 6,
+      },
+    }
+
+    const dynamic = deriveLivePlayResolution(core)
+    expect(dynamic).not.toBeNull()
+    expect(dynamic!.outcome).toBe('sack')
+    expect(dynamic!.yardsGained).toBe(-6)
   })
 })

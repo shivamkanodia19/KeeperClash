@@ -133,6 +133,7 @@ export default function FootballSim() {
   )
   const actionsRef = useRef(actions)
   const heldKeysRef = useRef<Set<string>>(new Set())
+  const gameRootRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     actionsRef.current = actions
@@ -184,6 +185,13 @@ export default function FootballSim() {
   const canSteer =
     (playAnimation.phase === 'snap' || playAnimation.phase === 'playInProgress') &&
     (playAnimation.controlMode === 'offense' || playAnimation.controlMode === 'defense')
+
+  useEffect(() => {
+    if (!canSteer) return
+    window.requestAnimationFrame(() => {
+      gameRootRef.current?.focus({ preventScroll: true })
+    })
+  }, [canSteer])
 
   useEffect(() => {
     const held = heldKeysRef.current
@@ -292,6 +300,8 @@ export default function FootballSim() {
 
   return (
     <main
+      ref={gameRootRef}
+      tabIndex={0}
       className="gb-shell"
       style={{
         '--home': teams.home.color,
@@ -698,7 +708,8 @@ function Field({
   const canChooseReceiver =
     state.possessionTeamId === state.userTeamId && animation.legal.canSelectReceiver
   const canChooseDefender =
-    state.possessionTeamId !== state.userTeamId && animation.defensiveControlEnabled
+    state.possessionTeamId !== state.userTeamId &&
+    (animation.defensiveControlEnabled || animation.controlMode === 'defense_preview')
 
   return (
     <div className="gb-field-frame" ref={fieldRef}>
@@ -950,7 +961,8 @@ function PlayerToken({
         top: `${yPct(player.y)}%`,
       }}
       onClick={canTarget ? onTarget : undefined}
-      disabled={!canTarget}
+      aria-disabled={!canTarget}
+      tabIndex={canTarget ? 0 : -1}
       title={`${side} ${role}`}
     >
       <span className="gb-player__shadow" />
@@ -1177,26 +1189,79 @@ function PlayPicker({
 }
 
 function DPad({ onMoveVector }: { onMoveVector: (x: number, y: number) => void }) {
-  const stop = useCallback(() => onMoveVector(0, 0), [onMoveVector])
+  const pressStartedAtRef = useRef(0)
+  const stopTimerRef = useRef<number | null>(null)
+  const lastPointerAtRef = useRef(0)
+  useEffect(
+    () => () => {
+      if (stopTimerRef.current != null) {
+        window.clearTimeout(stopTimerRef.current)
+      }
+    },
+    [],
+  )
+  const stopNow = useCallback(() => onMoveVector(0, 0), [onMoveVector])
+  const stop = useCallback(() => {
+    if (stopTimerRef.current != null) {
+      window.clearTimeout(stopTimerRef.current)
+      stopTimerRef.current = null
+    }
+    const heldFor = performance.now() - pressStartedAtRef.current
+    const remaining = Math.max(0, 180 - heldFor)
+    if (remaining === 0) {
+      stopNow()
+      return
+    }
+    stopTimerRef.current = window.setTimeout(() => {
+      stopTimerRef.current = null
+      stopNow()
+    }, remaining)
+  }, [stopNow])
   const press = useCallback(
     (x: number, y: number) => (event: PointerEvent<HTMLButtonElement>) => {
-      event.currentTarget.setPointerCapture(event.pointerId)
+      if (stopTimerRef.current != null) {
+        window.clearTimeout(stopTimerRef.current)
+        stopTimerRef.current = null
+      }
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId)
+      } catch {
+        // Some embedded/mobile contexts do not allow capture for every pointer.
+      }
+      lastPointerAtRef.current = performance.now()
+      pressStartedAtRef.current = performance.now()
       onMoveVector(x, y)
     },
     [onMoveVector],
   )
+  const keyboardPulse = useCallback(
+    (x: number, y: number) => () => {
+      if (performance.now() - lastPointerAtRef.current < 500) {
+        return
+      }
+      if (stopTimerRef.current != null) {
+        window.clearTimeout(stopTimerRef.current)
+      }
+      onMoveVector(x, y)
+      stopTimerRef.current = window.setTimeout(() => {
+        stopTimerRef.current = null
+        stopNow()
+      }, 180)
+    },
+    [onMoveVector, stopNow],
+  )
   return (
     <div className="gb-dpad" aria-label="Active player movement">
-      <button type="button" className="gb-dpad__up" onPointerDown={press(0, -1)} onPointerUp={stop} onPointerCancel={stop}>
+      <button type="button" className="gb-dpad__up" onClick={keyboardPulse(0, -1)} onPointerDown={press(0, -1)} onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={stop}>
         W
       </button>
-      <button type="button" className="gb-dpad__left" onPointerDown={press(-1, 0)} onPointerUp={stop} onPointerCancel={stop}>
+      <button type="button" className="gb-dpad__left" onClick={keyboardPulse(-1, 0)} onPointerDown={press(-1, 0)} onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={stop}>
         A
       </button>
-      <button type="button" className="gb-dpad__right" onPointerDown={press(1, 0)} onPointerUp={stop} onPointerCancel={stop}>
+      <button type="button" className="gb-dpad__right" onClick={keyboardPulse(1, 0)} onPointerDown={press(1, 0)} onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={stop}>
         D
       </button>
-      <button type="button" className="gb-dpad__down" onPointerDown={press(0, 1)} onPointerUp={stop} onPointerCancel={stop}>
+      <button type="button" className="gb-dpad__down" onClick={keyboardPulse(0, 1)} onPointerDown={press(0, 1)} onPointerUp={stop} onPointerCancel={stop} onLostPointerCapture={stop}>
         S
       </button>
     </div>
