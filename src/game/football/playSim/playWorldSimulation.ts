@@ -460,6 +460,14 @@ function computeDesiredMotion(
   }
 
   if (p.unit === 'defense') {
+    if (input.activePlayerId === p.id) {
+      const moveX = input.moveX ?? 0
+      const moveY = input.moveY ?? 0
+      if (Math.hypot(moveX, moveY) > 0.05) {
+        const len = Math.hypot(moveX, moveY) || 1
+        return { dx: moveX / len, dy: moveY / len, maxMul: 1.12 }
+      }
+    }
     if (!carrier) return { dx: 0.4, dy: 0, maxMul: 0.8 }
     if (p.assignment.startsWith('mirror:')) {
       const tid = p.assignment.slice('mirror:'.length)
@@ -886,7 +894,7 @@ export function stepPlayWorld(
     }
   }
 
-  if (w.time > 14) w.finished = true
+  if (w.time > 20) w.finished = true
 
   return w
 }

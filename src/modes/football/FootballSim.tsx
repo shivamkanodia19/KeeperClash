@@ -181,11 +181,9 @@ export default function FootballSim() {
     setAwayTeamIndex((index) => (index + direction + pool.length) % pool.length)
   }, [])
 
-  const userOnOffense = state.possessionTeamId === state.userTeamId
   const canSteer =
-    userOnOffense &&
     (playAnimation.phase === 'snap' || playAnimation.phase === 'playInProgress') &&
-    playAnimation.controlMode === 'offense'
+    (playAnimation.controlMode === 'offense' || playAnimation.controlMode === 'defense')
 
   useEffect(() => {
     const held = heldKeysRef.current
@@ -309,6 +307,7 @@ export default function FootballSim() {
           animation={playAnimation}
           flash={flash}
           onReceiverTarget={actions.throwTo}
+          onPlayerSelect={actions.switchPlayer}
         />
         <PhaseBanner state={state} animation={playAnimation} />
         {state.lastResultSummary ? (
@@ -660,11 +659,13 @@ function Field({
   animation,
   flash,
   onReceiverTarget,
+  onPlayerSelect,
 }: {
   state: FootballGameViewState
   animation: PlayAnimationSnapshot
   flash: 'none' | 'good' | 'bad'
   onReceiverTarget: (receiverId: string) => void
+  onPlayerSelect: (playerId: string) => void
 }) {
   const fieldRef = useRef<HTMLDivElement | null>(null)
   const cam = animation.cameraRecommendation
@@ -696,6 +697,8 @@ function Field({
 
   const canChooseReceiver =
     state.possessionTeamId === state.userTeamId && animation.legal.canSelectReceiver
+  const canChooseDefender =
+    state.possessionTeamId !== state.userTeamId && animation.defensiveControlEnabled
 
   return (
     <div className="gb-field-frame" ref={fieldRef}>
@@ -743,17 +746,26 @@ function Field({
           />
         ) : null}
 
-        {animation.players.map((player) => (
-          <PlayerToken
-            key={player.id}
-            player={player}
-            animation={animation}
-            xPct={xPct}
-            yPct={yPct}
-            canTarget={canChooseReceiver && receiverIds.includes(player.id)}
-            onTarget={() => onReceiverTarget(player.id)}
-          />
-        ))}
+        {animation.players.map((player) => {
+          const canTargetReceiver = canChooseReceiver && receiverIds.includes(player.id)
+          const canTargetDefender =
+            canChooseDefender && animation.controllablePlayerIds.includes(player.id)
+          return (
+            <PlayerToken
+              key={player.id}
+              player={player}
+              animation={animation}
+              xPct={xPct}
+              yPct={yPct}
+              canTarget={canTargetReceiver || canTargetDefender}
+              onTarget={() =>
+                canTargetReceiver
+                  ? onReceiverTarget(player.id)
+                  : onPlayerSelect(player.id)
+              }
+            />
+          )
+        })}
 
         <BallToken animation={animation} xPct={xPct} yPct={yPct} />
 
@@ -1041,6 +1053,26 @@ function ControlDeck({
   }
 
   if (live && !userOnOffense) {
+    if (animation.defensiveControlEnabled) {
+      return (
+        <section className="gb-controls gb-controls--live">
+          <DPad onMoveVector={onMoveVector} />
+          <div className="gb-live-hint">
+            <strong>Control the defender</strong>
+            <span>WASD moves. R switches. Space closes for tackle.</span>
+            <small>Active: {animation.selectedDefenderId ?? animation.activePlayerId ?? 'none'}</small>
+          </div>
+          <div className="gb-action-cluster">
+            <button type="button" onClick={onReceiver}>
+              Switch
+            </button>
+            <button type="button" onClick={onDive}>
+              Tackle
+            </button>
+          </div>
+        </section>
+      )
+    }
     return (
       <section className="gb-controls gb-controls--watching">
         <strong>AI offense</strong>

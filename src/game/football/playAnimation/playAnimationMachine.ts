@@ -34,8 +34,9 @@ import {
 } from '../playSim/playWorldSimulation'
 
 const YARD_ANIM_STEP = 0.34
+const PLAYBACK_TIME_SCALE = 0.42
 /** Physics substeps bundled into one `moveBallCarrier` UI tick. */
-const SIM_SUBSTEPS_PER_MOVE = 20
+const SIM_SUBSTEPS_PER_MOVE = 10
 
 export type PlayAnimationCore = {
   phase: PlayAnimationPhase
@@ -243,7 +244,7 @@ export function derivePlayAnimationLegal(
 }
 
 function defenderCandidates(players: readonly PlayerFieldPosition[]): readonly string[] {
-  return players.filter((p) => p.unit === 'defense').map((p) => p.id).slice(0, 6)
+  return players.filter((p) => p.unit === 'defense').map((p) => p.id)
 }
 
 function offensiveControlCandidates(core: PlayAnimationCore): readonly string[] {
@@ -256,6 +257,57 @@ function offensiveControlCandidates(core: PlayAnimationCore): readonly string[] 
     }
   }
   return ids
+}
+
+function passReceiverCandidates(core: PlayAnimationCore): readonly string[] {
+  const play = getOffensivePlay(core.committedOffensePlayId ?? '')
+  if (!play || play.category !== 'pass') return []
+  return [...passReceiverIds(core.offenseTeamAtSnap, play.formationId)]
+}
+
+function currentPassTargetId(core: PlayAnimationCore, receivers: readonly string[]): string | null {
+  const target = core.world?.primaryTargetId ?? core.ball.throwTargetId
+  if (target && receivers.includes(target)) return target
+  const idx = core.receiverCycle % Math.max(1, receivers.length)
+  return receivers[idx] ?? null
+}
+
+function applyPassTargetSelection(
+  core: PlayAnimationCore,
+  receiverId: string,
+  receiverIndex: number,
+): PlayAnimationCore | null {
+  if (receiverIndex < 0) return null
+  const nextCycle = receiverIndex + 1
+  if (!core.world) {
+    return {
+      ...core,
+      ball: { ...core.ball, throwTargetId: receiverId },
+      receiverCycle: nextCycle,
+    }
+  }
+  const w = setWorldPrimaryTarget(core.world, receiverId)
+  const { players, ball } = syncWorldToField(w)
+  return {
+    ...core,
+    world: w,
+    receiverCycle: nextCycle,
+    players: syncCarrierToPlayers(players, ball),
+    ball,
+  }
+}
+
+function activePlayerAfterWorldSync(
+  core: PlayAnimationCore,
+  players: readonly PlayerFieldPosition[],
+  ball: BallFieldState,
+): string | null {
+  const active = players.find((p) => p.id === core.activePlayerId)
+  if (active?.unit === 'defense') {
+    const ballHolder = ball.carrierId ? players.find((p) => p.id === ball.carrierId) : null
+    return ballHolder?.unit === 'defense' ? ballHolder.id : active.id
+  }
+  return ball.carrierId ?? core.activePlayerId
 }
 
 export function toPlayAnimationSnapshot(
@@ -336,19 +388,29 @@ export function toPlayAnimationSnapshot(
   const defenderIds = defenderCandidates(players)
   const offenseCandidates = offensiveControlCandidates(core)
   const liveControl = core.phase === 'snap' || core.phase === 'playInProgress'
+  const userOnDefense = Boolean(engine && !userOnOffense)
+  const defensiveLiveControl = userOnDefense && liveControl
   const controllablePlayerIds = userOnOffense ? offenseCandidates : defenderIds
   const controlMode: PlayAnimationSnapshot['controlMode'] =
     userOnOffense && liveControl
       ? 'offense'
-      : !userOnOffense && core.phase === 'preSnap'
+      : defensiveLiveControl
+        ? 'defense'
+      : userOnDefense && core.phase === 'preSnap'
         ? 'defense_preview'
         : 'none'
   const inputHints =
     controlMode === 'offense'
       ? ['move', 'juke', 'dive', 'switch']
+      : controlMode === 'defense'
+        ? ['move', 'switch', 'tackle']
       : controlMode === 'defense_preview'
         ? ['select defensive call']
         : []
+  const selectedDefenderId =
+    defensiveLiveControl && core.activePlayerId && defenderIds.includes(core.activePlayerId)
+      ? core.activePlayerId
+      : null
 
   return {
     schemaVersion: 1,
@@ -372,9 +434,9 @@ export function toPlayAnimationSnapshot(
     playTimelineSegments,
     cameraRecommendation,
     playResultMarkers,
-    selectedDefenderId: null,
+    selectedDefenderId,
     controllableDefenderCandidates: defenderIds,
-    defensiveControlEnabled: false,
+    defensiveControlEnabled: defensiveLiveControl,
     activePlayerId: core.activePlayerId,
     controllablePlayerIds,
     controlMode,
@@ -497,26 +559,72 @@ export function setPlayerMoveVector(
 export function switchActivePlayer(
   core: PlayAnimationCore,
   target?: string | number,
+  unit: 'offense' | 'defense' = 'offense',
 ): PlayAnimationCore | null {
+  if (unit === 'defense') {
+    const ids = defenderCandidates(core.players)
+    if (ids.length === 0) return core
+
+    let nextId: string
+    if (typeof target === 'string' && ids.includes(target)) {
+      nextId = target
+    } else {
+      const direction = typeof target === 'number' && target < 0 ? -1 : 1
+      const currentIdx = ids.indexOf(core.activePlayerId ?? '')
+      const startIdx = currentIdx >= 0 ? currentIdx : direction > 0 ? -1 : 0
+      nextId = ids[(startIdx + direction + ids.length) % ids.length]!
+    }
+
+    return { ...core, activePlayerId: nextId }
+  }
+
+  const play = getOffensivePlay(core.committedOffensePlayId ?? '')
+  if (play?.category === 'pass') {
+    const receivers = passReceiverCandidates(core)
+    if (receivers.length === 0) return core
+
+    const currentTarget = currentPassTargetId(core, receivers)
+    let nextId = currentTarget ?? receivers[0]!
+    let nextIndex = receivers.indexOf(nextId)
+
+    if (typeof target === 'string') {
+      const directIdx = receivers.indexOf(target)
+      if (directIdx >= 0) {
+        nextId = target
+        nextIndex = directIdx
+      } else {
+        nextIndex = nextIndex >= 0 ? nextIndex : 0
+      }
+    } else if (typeof target === 'number') {
+      const direction = target < 0 ? -1 : 1
+      const baseIdx = nextIndex >= 0 ? nextIndex : 0
+      nextIndex = (baseIdx + direction + receivers.length) % receivers.length
+      nextId = receivers[nextIndex]!
+    } else if (nextIndex < 0) {
+      nextIndex = 0
+      nextId = receivers[0]!
+    } else {
+      nextIndex = (nextIndex + 1) % receivers.length
+      nextId = receivers[nextIndex]!
+    }
+
+    return applyPassTargetSelection(core, nextId, nextIndex)
+  }
+
   const ids = offensiveControlCandidates(core)
   if (ids.length === 0) return core
 
-  const currentIdx = Math.max(0, ids.indexOf(core.activePlayerId ?? ids[0]!))
   let nextId: string
   if (typeof target === 'string' && ids.includes(target)) {
     nextId = target
   } else {
     const direction = typeof target === 'number' && target < 0 ? -1 : 1
-    nextId = ids[(currentIdx + direction + ids.length) % ids.length]!
+    const currentIdx = ids.indexOf(core.activePlayerId ?? '')
+    const startIdx = currentIdx >= 0 ? currentIdx : direction > 0 ? -1 : 0
+    nextId = ids[(startIdx + direction + ids.length) % ids.length]!
   }
 
-  let nextWorld = core.world
-  const play = getOffensivePlay(core.committedOffensePlayId ?? '')
-  if (play?.category === 'pass' && nextWorld && nextId !== core.ball.carrierId) {
-    nextWorld = setWorldPrimaryTarget(nextWorld, nextId)
-  }
-
-  return { ...core, activePlayerId: nextId, world: nextWorld }
+  return { ...core, activePlayerId: nextId }
 }
 
 /**
@@ -531,7 +639,7 @@ export function advancePlaySimulationFrame(
 
   let w = core.world
   const res = core.pendingResolution
-  const dtSec = Math.min(0.22, Math.max(0, dtMs) / 1000)
+  const dtSec = Math.min(0.16, (Math.max(0, dtMs) / 1000) * PLAYBACK_TIME_SCALE)
   let acc = 0
   while (acc + SUBSTEP_DT <= dtSec + 1e-9) {
     w = stepPlayWorld(
@@ -560,7 +668,7 @@ export function advancePlaySimulationFrame(
     phase,
     players: syncCarrierToPlayers(players, ball),
     ball,
-    activePlayerId: ball.carrierId ?? core.activePlayerId,
+    activePlayerId: activePlayerAfterWorldSync(core, players, ball),
     animatedYards,
   }
 }
@@ -595,7 +703,7 @@ function stepWorldOnce(core: PlayAnimationCore): PlayAnimationCore | null {
     phase,
     players: syncCarrierToPlayers(players, ball),
     ball,
-    activePlayerId: ball.carrierId ?? core.activePlayerId,
+    activePlayerId: activePlayerAfterWorldSync(core, players, ball),
     animatedYards,
   }
 }
@@ -682,7 +790,7 @@ export function juke(core: PlayAnimationCore): PlayAnimationCore | null {
       world: w,
       players: syncCarrierToPlayers(players, ball),
       ball,
-      activePlayerId: ball.carrierId ?? core.activePlayerId,
+      activePlayerId: activePlayerAfterWorldSync(core, players, ball),
     }
   }
   const ny = Math.max(-20, Math.min(20, core.ball.y + 3))
@@ -694,14 +802,33 @@ export function juke(core: PlayAnimationCore): PlayAnimationCore | null {
 export function dive(core: PlayAnimationCore): PlayAnimationCore | null {
   if (core.phase !== 'playInProgress') return null
   if (core.world) {
-    const w = applyCarrierDive(core.world)
+    const world = core.world
+    const active = world.players.find((p) => p.id === core.activePlayerId)
+    const w =
+      active?.unit === 'defense'
+        ? {
+            ...world,
+            players: world.players.map((p) => {
+              if (p.id !== active.id) return p
+              const dx = world.ball.x - p.x
+              const dy = world.ball.y - p.y
+              const len = Math.hypot(dx, dy) || 1
+              return {
+                ...p,
+                vx: p.vx + (dx / len) * 2.4,
+                vy: p.vy + (dy / len) * 2.4,
+                phase: 'tackleAttempt' as const,
+              }
+            }),
+          }
+        : applyCarrierDive(world)
     const { players, ball } = syncWorldToField(w)
     return {
       ...core,
       world: w,
       players: syncCarrierToPlayers(players, ball),
       ball,
-      activePlayerId: ball.carrierId ?? core.activePlayerId,
+      activePlayerId: activePlayerAfterWorldSync(core, players, ball),
     }
   }
   const nextAnimated = stepTowardTarget(
@@ -731,53 +858,19 @@ export function setPassTargetReceiver(
   receiverId: string,
 ): PlayAnimationCore | null {
   if (core.phase !== 'playInProgress' && core.phase !== 'snap') return null
-  const oid = core.committedOffensePlayId ?? ''
-  const play = getOffensivePlay(oid)
-  if (!play || play.category !== 'pass') return null
-  const receivers = [...passReceiverIds(core.offenseTeamAtSnap, play.formationId)]
+  const receivers = passReceiverCandidates(core)
   const idx = receivers.indexOf(receiverId)
-  if (idx < 0 || !core.world) return null
-  const w = setWorldPrimaryTarget(core.world, receiverId)
-  const { players, ball } = syncWorldToField(w)
-  return {
-    ...core,
-    receiverCycle: idx,
-    world: w,
-    activePlayerId: receiverId,
-    players: syncCarrierToPlayers(players, ball),
-    ball,
-  }
+  if (idx < 0) return null
+  return applyPassTargetSelection(core, receiverId, idx)
 }
 
 export function selectReceiver(core: PlayAnimationCore): PlayAnimationCore | null {
   if (core.phase !== 'playInProgress') return null
-  const oid = core.committedOffensePlayId ?? ''
-  const play = getOffensivePlay(oid)
-  if (!play || play.category !== 'pass') return null
-  const receivers = passReceiverIds(core.offenseTeamAtSnap, play.formationId)
+  const receivers = passReceiverCandidates(core)
+  if (receivers.length === 0) return null
   const idx = core.receiverCycle % receivers.length
   const targetId = receivers[idx]!
-  const nextCycle = core.receiverCycle + 1
-  if (core.world) {
-    const w = setWorldPrimaryTarget(core.world, targetId)
-    const { players, ball } = syncWorldToField(w)
-    return {
-      ...core,
-      world: w,
-      receiverCycle: nextCycle,
-      activePlayerId: targetId,
-      players: syncCarrierToPlayers(players, ball),
-      ball,
-    }
-  }
-  const ball = {
-    ...core.ball,
-    carrierId: targetId,
-    x: core.ball.x,
-    y: core.ball.y,
-  }
-  const players = syncCarrierToPlayers(core.players, ball)
-  return { ...core, ball, players, receiverCycle: nextCycle, activePlayerId: targetId }
+  return applyPassTargetSelection(core, targetId, idx)
 }
 
 /**

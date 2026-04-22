@@ -207,10 +207,14 @@ export function useFootballGame(
     if (!isValidPlayId(offId) || !isValidDefenseId(defId)) return
     const out = snap(animCore, engine, offId, defId)
     if (out) {
-      animCoreRef.current = out.core
-      setAnimCore(out.core)
+      const nextCore =
+        engine.possession !== userTeamId
+          ? (switchActivePlayer(out.core, undefined, 'defense') ?? out.core)
+          : out.core
+      animCoreRef.current = nextCore
+      setAnimCore(nextCore)
     }
-  }, [animCore, engine, defensePick, offensePick])
+  }, [animCore, engine, defensePick, offensePick, userTeamId])
 
   const moveBallCarrierAction = useCallback(() => {
     if (!animCore) return
@@ -267,11 +271,14 @@ export function useFootballGame(
   const switchPlayerAction = useCallback((target?: string | number) => {
     setAnimCore((c) => {
       if (!c) return c
-      const next = switchActivePlayer(c, target) ?? c
+      const currentEngine = engineRef.current
+      const unit =
+        currentEngine && currentEngine.possession !== userTeamId ? 'defense' : 'offense'
+      const next = switchActivePlayer(c, target, unit) ?? c
       animCoreRef.current = next
       return next
     })
-  }, [])
+  }, [userTeamId])
 
   const setPassTargetReceiverAction = useCallback((receiverId: string) => {
     setAnimCore((c) => {
@@ -288,8 +295,17 @@ export function useFootballGame(
   }, [diveAction])
 
   const secondaryAction = useCallback(() => {
+    const currentEngine = engineRef.current
+    const currentCore = animCoreRef.current
+    const userOnDefense = Boolean(currentEngine && currentEngine.possession !== userTeamId)
+    const live =
+      currentCore?.phase === 'snap' || currentCore?.phase === 'playInProgress'
+    if (userOnDefense && live) {
+      switchPlayerAction()
+      return
+    }
     jukeAction()
-  }, [jukeAction])
+  }, [jukeAction, switchPlayerAction, userTeamId])
 
   const advanceResultAction = useCallback(() => {
     if (!animCore || !engine) return

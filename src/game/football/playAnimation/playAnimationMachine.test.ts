@@ -9,6 +9,7 @@ import {
   setPlayerMoveVector,
   snap,
   switchActivePlayer,
+  toPlayAnimationSnapshot,
 } from './playAnimationMachine'
 
 describe('playAnimationMachine', () => {
@@ -49,7 +50,7 @@ describe('playAnimationMachine', () => {
     expect(cleared?.phase).toBe('preSnap')
   })
 
-  it('active player starts on carrier and move vector changes path', () => {
+  it('run play active player starts on carrier and move vector changes path', () => {
     const engine = createTestScrimmageState()
     let core = createPlayAnimationCore(engine)
     const s0 = snap(core, engine, 'inside_zone', 'cover_2_zone')
@@ -57,21 +58,74 @@ describe('playAnimationMachine', () => {
     core = s0!.core
     expect(core.activePlayerId).toBe(core.ball.carrierId)
 
-    const startY = core.ball.y
+    const startY = core.world?.ball.y ?? core.ball.y
     core = setPlayerMoveVector(core, 0, 1)
     const moved = advancePlaySimulationFrame(core, 260)
     expect(moved).not.toBeNull()
+    expect(moved!.activePlayerId).toBe(moved!.ball.carrierId)
     expect(moved!.ball.y).toBeGreaterThan(startY)
   })
 
-  it('switchPlayer cycles pass targets', () => {
+  it('pass play switchPlayer changes throw target while QB keeps control until catch transfer', () => {
     const engine = createTestScrimmageState()
     let core = createPlayAnimationCore(engine)
     const s0 = snap(core, engine, 'quick_slants', 'cover_2_zone')
     expect(s0).not.toBeNull()
     core = s0!.core
+    const qbId = core.ball.carrierId
+    expect(qbId).not.toBeNull()
+    const originalTarget = core.ball.throwTargetId
     const switched = switchActivePlayer(core)
     expect(switched).not.toBeNull()
-    expect(switched!.activePlayerId).not.toBe(core.activePlayerId)
+    expect(switched!.activePlayerId).toBe(qbId)
+    expect(switched!.ball.throwTargetId).not.toBe(originalTarget)
+    expect(switched!.ball.throwTargetId).toBe(switched!.world?.primaryTargetId)
+
+    core = switched!
+    let steps = 0
+    while (
+      steps < 240 &&
+      core.phase !== 'tackleOrScore' &&
+      (core.ball.carrierId === qbId || core.ball.carrierId === null)
+    ) {
+      const next = advancePlaySimulationFrame(core, 80)
+      expect(next).not.toBeNull()
+      core = next!
+      steps++
+    }
+
+    expect(core.ball.carrierId).not.toBe(qbId)
+    expect(core.ball.carrierId).not.toBeNull()
+    expect(core.activePlayerId).toBe(core.ball.carrierId)
+  })
+
+  it('defensive control can select and steer a defender', () => {
+    const engine = {
+      ...createTestScrimmageState(),
+      possession: 'away' as const,
+      userControlledTeam: 'home' as const,
+    }
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'inside_zone', 'cover_2_zone')
+    expect(s0).not.toBeNull()
+    core = switchActivePlayer(s0!.core, 'home_cb1', 'defense')!
+
+    const view = toPlayAnimationSnapshot(
+      core,
+      engine,
+      'home',
+      'inside_zone',
+      'cover_2_zone',
+    )
+    expect(view.controlMode).toBe('defense')
+    expect(view.defensiveControlEnabled).toBe(true)
+    expect(view.selectedDefenderId).toBe('home_cb1')
+
+    const startY = core.players.find((p) => p.id === 'home_cb1')!.y
+    core = setPlayerMoveVector(core, 0, 1)
+    const moved = advancePlaySimulationFrame(core, 500)
+    expect(moved).not.toBeNull()
+    expect(moved!.activePlayerId).toBe('home_cb1')
+    expect(moved!.players.find((p) => p.id === 'home_cb1')!.y).toBeGreaterThan(startY)
   })
 })
