@@ -75,6 +75,10 @@ export const SAMPLE_FOOTBALL_VIEW_STATE: FootballGameViewState = {
   awayScore: 3,
   quarter: 2,
   clockSeconds: 78,
+  clockRunning: true,
+  playClockSeconds: 18,
+  clockMode: 'pre_snap_running',
+  lastClockEvent: 'Clock running after in-bounds play.',
   quarterLengthSeconds: 120,
   quarterLengthOptions: [60, 120, 180, 300],
   possessionTeamId: 'home',
@@ -141,4 +145,8 @@ export const SAMPLE_PLAY_ANIMATION: PlayAnimationSnapshot = {
     .map((p) => p.id)
     .slice(0, 4),
   defensiveControlEnabled: false,
+  activePlayerId: null,
+  controllablePlayerIds: [],
+  controlMode: 'none',
+  inputHints: [],
 }

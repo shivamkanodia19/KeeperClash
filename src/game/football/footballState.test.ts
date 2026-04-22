@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Down, FootballGameState, Quarter, TeamId } from './footballTypes'
 import {
   applyClock,
+  applyRealtimeClock,
   applyResolvedPlay,
   advanceDrive,
   createTestScrimmageState,
@@ -20,6 +21,8 @@ describe('applyResolvedPlay scrimmage', () => {
     expect(next.yardLine).toBe(29)
     expect(next.down).toBe(2)
     expect(next.yardsToGo).toBe(6)
+    expect(next.clockSeconds).toBe(base.clockSeconds)
+    expect(next.clockMode).toBe('pre_snap_running')
   })
 
   it('2nd and 6 at 29, gain 7 -> 1st and 10', () => {
@@ -145,6 +148,58 @@ describe('applyClock', () => {
     expect(tick.gameOver).toBe(true)
     expect(tick.clockSeconds).toBe(0)
     expect(tick.quarter).toBe(4)
+  })
+})
+
+describe('applyRealtimeClock', () => {
+  it('ticks game clock from elapsed live dt', () => {
+    const s = createTestScrimmageState()
+    const tick = applyRealtimeClock(s, 5, 'live')
+    expect(tick.clockSeconds).toBe(115)
+    expect(tick.playClockSeconds).toBe(25)
+    expect(tick.clockRunning).toBe(true)
+  })
+
+  it('pre-snap stopped drains play clock only', () => {
+    const s = createTestScrimmageState()
+    const tick = applyRealtimeClock(s, 4, 'pre_snap_stopped')
+    expect(tick.clockSeconds).toBe(120)
+    expect(tick.playClockSeconds).toBe(21)
+    expect(tick.clockRunning).toBe(false)
+  })
+
+  it('pre-snap running drains game clock and play clock', () => {
+    const s: FootballGameState = {
+      ...createTestScrimmageState(),
+      clockRunning: true,
+      clockMode: 'pre_snap_running',
+    }
+    const tick = applyRealtimeClock(s, 6, 'pre_snap_running')
+    expect(tick.clockSeconds).toBe(114)
+    expect(tick.playClockSeconds).toBe(19)
+    expect(tick.clockRunning).toBe(true)
+  })
+
+  it('play clock expiration clamps and records event', () => {
+    const s: FootballGameState = {
+      ...createTestScrimmageState(),
+      playClockSeconds: 2,
+    }
+    const tick = applyRealtimeClock(s, 5, 'pre_snap_stopped')
+    expect(tick.playClockSeconds).toBe(0)
+    expect(tick.lastClockEvent).toMatch(/Play clock expired/)
+  })
+
+  it('Q4 real-time expiration ends the game', () => {
+    const s: FootballGameState = {
+      ...createTestScrimmageState(),
+      quarter: 4 as Quarter,
+      clockSeconds: 1,
+    }
+    const tick = applyRealtimeClock(s, 2, 'live')
+    expect(tick.gameOver).toBe(true)
+    expect(tick.sessionPhase).toBe('game_over')
+    expect(tick.clockSeconds).toBe(0)
   })
 })
 

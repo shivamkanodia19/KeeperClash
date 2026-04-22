@@ -3,7 +3,7 @@
  * Intended for consumption by this app or a separate UI package — keep stable semver-ish changes only.
  */
 
-import type { GameSessionPhase, KickoffContext } from '../footballTypes'
+import type { GameClockMode, GameSessionPhase, KickoffContext } from '../footballTypes'
 
 /** Scoreboard / possession side. Aligns with engine `TeamId`. */
 export type FootballTeamSide = 'home' | 'away'
@@ -49,6 +49,10 @@ export type FootballGameViewState = {
   quarter: 1 | 2 | 3 | 4
   /** Remaining time in the current quarter, seconds (integer or fractional). */
   clockSeconds: number
+  clockRunning: boolean
+  playClockSeconds: number
+  clockMode: GameClockMode
+  lastClockEvent: string | null
   /** Configured quarter duration for this session (arcade pacing). */
   quarterLengthSeconds: number
   /** Supported values for settings UI (seconds). */
@@ -136,6 +140,16 @@ export type FootballGameActions = {
   advanceResult: () => void
   /** Lateral steer for user-controlled ball carrier while sim is live (-1 … 1). */
   setCarrierSteerInput: (steer: number) => void
+  /** Continuous 2D movement intent for the active controlled player. */
+  setMoveVector: (x: number, y: number) => void
+  /** Cycle or select the active controlled player. */
+  switchPlayer: (target?: string | number) => void
+  /** Context action: dive on offense, tackle when defensive control is enabled. */
+  primaryAction: () => void
+  /** Context action: juke/switch helper. */
+  secondaryAction: () => void
+  /** Throw/select a receiver directly on pass plays. */
+  throwTo: (receiverId: string) => void
   /** On pass plays, set the primary throw target by receiver player id (e.g. `home_wr1`). */
   setPassTargetReceiver: (receiverId: string) => void
 }

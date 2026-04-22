@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { advanceGameFrame } from '../gameFrame'
 import { advanceDrive, createLiveStateAfterOpeningKickoff } from '../footballState'
 import type { FootballGameState } from '../footballTypes'
 import {
-  advanceResult,
-  advancePlaySimulationFrame,
   createPlayAnimationCore,
+  advanceResult,
   dive,
   idlePlayAnimationSnapshot,
   juke,
@@ -12,7 +12,9 @@ import {
   selectReceiver,
   setCarrierSteerInput,
   setPassTargetReceiver,
+  setPlayerMoveVector,
   snap,
+  switchActivePlayer,
   toPlayAnimationSnapshot,
 } from '../playAnimation'
 import type { PlayAnimationCore } from '../playAnimation'
@@ -78,13 +80,28 @@ export function useFootballGame(
   const [defensePick, setDefensePick] = useState<string | null>(DEFAULT_DEFENSE_ID)
   const frameRef = useRef<number | null>(null)
   const lastFrameAtRef = useRef<number | null>(null)
-
-  const worldActive =
-    Boolean(animCore?.world) &&
-    (animCore?.phase === 'snap' || animCore?.phase === 'playInProgress')
+  const engineRef = useRef<FootballGameState | null>(initialEngine)
+  const animCoreRef = useRef<PlayAnimationCore | null>(
+    initialEngine ? createPlayAnimationCore(initialEngine) : null,
+  )
 
   useEffect(() => {
-    if (!worldActive) {
+    engineRef.current = engine
+  }, [engine])
+
+  useEffect(() => {
+    animCoreRef.current = animCore
+  }, [animCore])
+
+  const frameActive =
+    Boolean(hasSession && engine && animCore && !engine.gameOver) &&
+    engine?.sessionPhase === 'play_calling' &&
+    (animCore?.phase === 'preSnap' ||
+      animCore?.phase === 'snap' ||
+      animCore?.phase === 'playInProgress')
+
+  useEffect(() => {
+    if (!frameActive) {
       if (frameRef.current != null) {
         cancelAnimationFrame(frameRef.current)
         frameRef.current = null
@@ -100,15 +117,15 @@ export function useFootballGame(
       const dtMs = now - prev
       lastFrameAtRef.current = now
 
-      setAnimCore((current) => {
-        if (
-          !current?.world ||
-          (current.phase !== 'snap' && current.phase !== 'playInProgress')
-        ) {
-          return current
-        }
-        return advancePlaySimulationFrame(current, dtMs) ?? current
-      })
+      const currentEngine = engineRef.current
+      const currentCore = animCoreRef.current
+      if (currentEngine) {
+        const next = advanceGameFrame(currentEngine, currentCore, dtMs)
+        engineRef.current = next.engine
+        animCoreRef.current = next.core
+        setEngine(next.engine)
+        setAnimCore(next.core)
+      }
 
       frameRef.current = requestAnimationFrame(tick)
     }
@@ -121,13 +138,16 @@ export function useFootballGame(
       }
       lastFrameAtRef.current = null
     }
-  }, [worldActive])
+  }, [frameActive])
 
   const startGame = useCallback(() => {
     const e = createLiveStateAfterOpeningKickoff(openingKickoffParams(userTeamId))
+    const c = createPlayAnimationCore(e)
+    engineRef.current = e
+    animCoreRef.current = c
     setEngine(e)
     setHasSession(true)
-    setAnimCore(createPlayAnimationCore(e))
+    setAnimCore(c)
     setLastPlaySummary(null)
     setOffensePick(DEFAULT_OFFENSE_ID)
     setDefensePick(DEFAULT_DEFENSE_ID)
@@ -135,9 +155,12 @@ export function useFootballGame(
 
   const resetGame = useCallback(() => {
     const e = createLiveStateAfterOpeningKickoff(openingKickoffParams(userTeamId))
+    const c = createPlayAnimationCore(e)
+    engineRef.current = e
+    animCoreRef.current = c
     setEngine(e)
     setHasSession(true)
-    setAnimCore(createPlayAnimationCore(e))
+    setAnimCore(c)
     setLastPlaySummary(null)
     setOffensePick(DEFAULT_OFFENSE_ID)
     setDefensePick(DEFAULT_DEFENSE_ID)
@@ -166,8 +189,11 @@ export function useFootballGame(
           : { userDefenseCallId: defId },
         Math.random,
       )
+      const c = createPlayAnimationCore(next)
+      engineRef.current = next
+      animCoreRef.current = c
       setEngine(next)
-      setAnimCore(createPlayAnimationCore(next))
+      setAnimCore(c)
       setLastPlaySummary(resolution.commentary)
     } catch {
       setLastPlaySummary('Play could not be resolved.')
@@ -180,58 +206,122 @@ export function useFootballGame(
     const defId = defensePick ?? DEFAULT_DEFENSE_ID
     if (!isValidPlayId(offId) || !isValidDefenseId(defId)) return
     const out = snap(animCore, engine, offId, defId)
-    if (out) setAnimCore(out.core)
+    if (out) {
+      animCoreRef.current = out.core
+      setAnimCore(out.core)
+    }
   }, [animCore, engine, defensePick, offensePick])
 
   const moveBallCarrierAction = useCallback(() => {
     if (!animCore) return
     const next = moveBallCarrier(animCore)
-    if (next) setAnimCore(next)
+    if (next) {
+      animCoreRef.current = next
+      setAnimCore(next)
+    }
   }, [animCore])
 
   const jukeAction = useCallback(() => {
     if (!animCore) return
     const next = juke(animCore)
-    if (next) setAnimCore(next)
+    if (next) {
+      animCoreRef.current = next
+      setAnimCore(next)
+    }
   }, [animCore])
 
   const diveAction = useCallback(() => {
     if (!animCore) return
     const next = dive(animCore)
-    if (next) setAnimCore(next)
+    if (next) {
+      animCoreRef.current = next
+      setAnimCore(next)
+    }
   }, [animCore])
 
   const selectReceiverAction = useCallback(() => {
     if (!animCore) return
     const next = selectReceiver(animCore)
-    if (next) setAnimCore(next)
+    if (next) {
+      animCoreRef.current = next
+      setAnimCore(next)
+    }
   }, [animCore])
 
   const setCarrierSteerInputAction = useCallback((steer: number) => {
-    setAnimCore((c) => (c ? setCarrierSteerInput(c, steer) : c))
+    setAnimCore((c) => {
+      const next = c ? setCarrierSteerInput(c, steer) : c
+      animCoreRef.current = next
+      return next
+    })
+  }, [])
+
+  const setMoveVectorAction = useCallback((x: number, y: number) => {
+    setAnimCore((c) => {
+      const next = c ? setPlayerMoveVector(c, x, y) : c
+      animCoreRef.current = next
+      return next
+    })
+  }, [])
+
+  const switchPlayerAction = useCallback((target?: string | number) => {
+    setAnimCore((c) => {
+      if (!c) return c
+      const next = switchActivePlayer(c, target) ?? c
+      animCoreRef.current = next
+      return next
+    })
   }, [])
 
   const setPassTargetReceiverAction = useCallback((receiverId: string) => {
     setAnimCore((c) => {
       if (!c) return c
       const n = setPassTargetReceiver(c, receiverId)
-      return n ?? c
+      const next = n ?? c
+      animCoreRef.current = next
+      return next
     })
   }, [])
+
+  const primaryAction = useCallback(() => {
+    diveAction()
+  }, [diveAction])
+
+  const secondaryAction = useCallback(() => {
+    jukeAction()
+  }, [jukeAction])
 
   const advanceResultAction = useCallback(() => {
     if (!animCore || !engine) return
     if (animCore.phase === 'tackleOrScore' && animCore.pendingNext) {
-      const applied = animCore.pendingNext
+      const applied: FootballGameState = {
+        ...animCore.pendingNext,
+        quarter: engine.quarter,
+        clockSeconds: engine.clockSeconds,
+        gameOver: engine.gameOver,
+        sessionPhase: engine.gameOver ? 'game_over' : animCore.pendingNext.sessionPhase,
+        clockRunning: engine.gameOver ? false : animCore.pendingNext.clockRunning,
+        clockMode: engine.gameOver ? 'stopped' : animCore.pendingNext.clockMode,
+        lastClockEvent: engine.gameOver
+          ? engine.lastClockEvent
+          : animCore.pendingNext.lastClockEvent,
+      }
       setEngine(applied)
+      engineRef.current = applied
       setLastPlaySummary(animCore.pendingResolution?.commentary ?? null)
       const nu = advanceResult(animCore, applied)
-      if (nu) setAnimCore(nu)
+      if (nu) {
+        animCoreRef.current = nu
+        setAnimCore(nu)
+      }
       return
     }
     if (animCore.phase === 'result') {
       const nu = advanceResult(animCore, engine)
-      if (nu) setAnimCore(nu)
+      if (nu) {
+        animCoreRef.current = nu
+        setAnimCore(nu)
+      }
     }
   }, [animCore, engine])
 
@@ -271,6 +361,11 @@ export function useFootballGame(
       selectReceiver: selectReceiverAction,
       advanceResult: advanceResultAction,
       setCarrierSteerInput: setCarrierSteerInputAction,
+      setMoveVector: setMoveVectorAction,
+      switchPlayer: switchPlayerAction,
+      primaryAction,
+      secondaryAction,
+      throwTo: setPassTargetReceiverAction,
       setPassTargetReceiver: setPassTargetReceiverAction,
     }),
     [
@@ -278,15 +373,19 @@ export function useFootballGame(
       diveAction,
       jukeAction,
       moveBallCarrierAction,
+      primaryAction,
       resetGame,
       runPlay,
+      secondaryAction,
       selectReceiverAction,
       setCarrierSteerInputAction,
+      setMoveVectorAction,
       setPassTargetReceiverAction,
       setSelectedDefensiveCallId,
       setSelectedOffensivePlayId,
       snapAction,
       startGame,
+      switchPlayerAction,
     ],
   )
 

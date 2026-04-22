@@ -386,9 +386,11 @@ function computeDesiredMotion(
   if (p.engagedWith || p.engagedBy) maxMul = 0.34 + Math.min(0.2, p.strength * 0.15)
 
   if (playCategory === 'pass' && p.role === 'QB' && world.passStage === 'qbCarry') {
+    const userMoveY = input.activePlayerId === p.id ? (input.moveY ?? 0) : input.carrierSteer
+    const userMoveX = input.activePlayerId === p.id ? (input.moveX ?? 0) : 0
     return {
-      dx: -0.22,
-      dy: input.carrierSteer * 0.35,
+      dx: -0.22 + userMoveX * 0.42,
+      dy: userMoveY * 0.55,
       maxMul: 0.48,
     }
   }
@@ -406,8 +408,11 @@ function computeDesiredMotion(
 
   if (p.phase === 'carryBall' && ball.carrierId === p.id) {
     const targetX = los + signedTargetYards * 0.96
-    const tx = Math.min(Math.max(los - 2, targetX), p.x + 16)
-    const ty = p.y + input.carrierSteer * 8
+    const isActive = input.activePlayerId === p.id
+    const moveX = isActive ? (input.moveX ?? 0) : 0
+    const moveY = isActive ? (input.moveY ?? 0) : input.carrierSteer
+    const tx = Math.min(Math.max(los - 3, targetX + moveX * 7), p.x + 16)
+    const ty = p.y + moveY * 9
     const dx = tx - p.x
     const dy = ty - p.y
     const len = Math.hypot(dx, dy) || 1

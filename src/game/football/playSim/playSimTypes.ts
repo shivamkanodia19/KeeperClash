@@ -90,6 +90,11 @@ export type PassSimStage = 'qbCarry' | 'inFlight' | 'received' | 'incomplete' | 
 export type PlayWorldInput = {
   /** -1 … 1 lateral intent for ball carrier (offense user). */
   carrierSteer: number
+  /** -1 ... 1 downfield/backfield intent for active player. */
+  moveX?: number
+  /** -1 ... 1 sideline intent for active player. */
+  moveY?: number
+  activePlayerId?: string | null
 }
 
 export type PlayWorldSimulation = {

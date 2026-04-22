@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent,
 } from 'react'
 import {
@@ -16,25 +17,36 @@ import {
   type PlayOption,
 } from '../../game/football/ui-contract'
 
-const TEAM_META = {
-  home: {
-    name: 'Blue Comets',
-    abbr: 'COM',
-    color: '#2f8cff',
-    trim: '#fff25d',
-  },
-  away: {
-    name: 'Red Vipers',
-    abbr: 'VIP',
-    color: '#ff3d4f',
-    trim: '#ffffff',
-  },
-} satisfies Record<FootballTeamSide, {
+type TeamMeta = {
   name: string
   abbr: string
   color: string
   trim: string
-}>
+  note: string
+}
+
+const TEAM_OPTIONS = {
+  home: [
+    { name: 'Lovable Lions', abbr: 'LIO', color: '#2f8cff', trim: '#fff25d', note: 'Home blues' },
+    { name: 'Pixel Panthers', abbr: 'PNT', color: '#8b5cf6', trim: '#fff25d', note: 'Purple speed' },
+    { name: 'Cyber Sharks', abbr: 'SHK', color: '#09d5ff', trim: '#061014', note: 'Neon attack' },
+  ],
+  away: [
+    { name: 'Vite Vipers', abbr: 'VIP', color: '#ff3d4f', trim: '#ffffff', note: 'Away reds' },
+    { name: 'Retro Rockets', abbr: 'RKT', color: '#ff8a1f', trim: '#101010', note: 'Arcade orange' },
+    { name: 'Neon Knights', abbr: 'KNT', color: '#f23fb4', trim: '#ffffff', note: 'Pink blitz' },
+  ],
+} satisfies Record<FootballTeamSide, TeamMeta[]>
+
+type KickoffIntroState = {
+  phase: 'lineup' | 'kick' | 'return' | 'tackle'
+  kickingTeam: FootballTeamSide
+  receivingTeam: FootballTeamSide
+}
+
+function otherSide(side: FootballTeamSide): FootballTeamSide {
+  return side === 'home' ? 'away' : 'home'
+}
 
 function formatClock(seconds: number): string {
   const total = Math.max(0, Math.ceil(seconds))
@@ -93,6 +105,13 @@ function facingClass(p: PlayerFieldPosition) {
 
 export default function FootballSim() {
   const [userTeamId, setUserTeamId] = useState<FootballTeamSide>('home')
+  const [homeTeamIndex, setHomeTeamIndex] = useState(0)
+  const [awayTeamIndex, setAwayTeamIndex] = useState(0)
+  const [kickoffIntro, setKickoffIntro] = useState<KickoffIntroState | null>(null)
+  const kickoffTimersRef = useRef<number[]>([])
+  const [shake, setShake] = useState(false)
+  const [flash, setFlash] = useState<'none' | 'good' | 'bad'>('none')
+  const lastImpactRef = useRef<string | null>(null)
   const {
     state,
     playAnimation,
@@ -105,42 +124,125 @@ export default function FootballSim() {
     source: 'live',
     liveOptions: { autoStart: false, userTeamId },
   })
+  const teams = useMemo(
+    () => ({
+      home: TEAM_OPTIONS.home[homeTeamIndex]!,
+      away: TEAM_OPTIONS.away[awayTeamIndex]!,
+    }),
+    [awayTeamIndex, homeTeamIndex],
+  )
+  const actionsRef = useRef(actions)
+  const heldKeysRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    actionsRef.current = actions
+  }, [actions])
+
+  useEffect(
+    () => () => {
+      kickoffTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+      kickoffTimersRef.current = []
+    },
+    [],
+  )
+
+  const startWithKickoff = useCallback(() => {
+    kickoffTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    kickoffTimersRef.current = []
+    const kickingTeam = userTeamId
+    const receivingTeam = otherSide(userTeamId)
+    setKickoffIntro({ phase: 'lineup', kickingTeam, receivingTeam })
+    kickoffTimersRef.current = [
+      window.setTimeout(
+        () => setKickoffIntro({ phase: 'kick', kickingTeam, receivingTeam }),
+        700,
+      ),
+      window.setTimeout(
+        () => setKickoffIntro({ phase: 'return', kickingTeam, receivingTeam }),
+        1450,
+      ),
+      window.setTimeout(
+        () => setKickoffIntro({ phase: 'tackle', kickingTeam, receivingTeam }),
+        2400,
+      ),
+      window.setTimeout(() => {
+        setKickoffIntro(null)
+        actionsRef.current.startGame()
+      }, 3150),
+    ]
+  }, [userTeamId])
+
+  const cycleTeam = useCallback((side: FootballTeamSide, direction: 1 | -1) => {
+    const pool = TEAM_OPTIONS[side]
+    if (side === 'home') {
+      setHomeTeamIndex((index) => (index + direction + pool.length) % pool.length)
+      return
+    }
+    setAwayTeamIndex((index) => (index + direction + pool.length) % pool.length)
+  }, [])
 
   const userOnOffense = state.possessionTeamId === state.userTeamId
   const canSteer =
     userOnOffense &&
     (playAnimation.phase === 'snap' || playAnimation.phase === 'playInProgress') &&
-    playAnimation.legal.canMoveBallCarrier
+    playAnimation.controlMode === 'offense'
 
   useEffect(() => {
+    const held = heldKeysRef.current
+    const emitMove = () => {
+      const x = (held.has('arrowright') || held.has('d') ? 1 : 0) -
+        (held.has('arrowleft') || held.has('a') ? 1 : 0)
+      const y = (held.has('arrowdown') || held.has('s') ? 1 : 0) -
+        (held.has('arrowup') || held.has('w') ? 1 : 0)
+      actionsRef.current.setMoveVector(x, y)
+    }
     const onKeyDown = (e: KeyboardEvent) => {
       if (!canSteer) return
       const key = e.key.toLowerCase()
-      if (key === 'arrowleft' || key === 'a') {
+      if (
+        key === 'arrowleft' ||
+        key === 'arrowright' ||
+        key === 'arrowup' ||
+        key === 'arrowdown' ||
+        key === 'a' ||
+        key === 'd' ||
+        key === 'w' ||
+        key === 's'
+      ) {
         e.preventDefault()
-        actions.setCarrierSteerInput(-1)
-      }
-      if (key === 'arrowright' || key === 'd') {
-        e.preventDefault()
-        actions.setCarrierSteerInput(1)
+        held.add(key)
+        emitMove()
       }
       if (key === 'j') {
         e.preventDefault()
-        actions.juke()
+        actionsRef.current.secondaryAction()
       }
       if (key === ' ' || key === 'k') {
         e.preventDefault()
-        actions.dive()
+        actionsRef.current.primaryAction()
       }
-      if (key === 'r') {
+      if (key === 'r' || key === 'tab') {
         e.preventDefault()
-        actions.selectReceiver()
+        actionsRef.current.switchPlayer()
       }
     }
     const onKeyUp = (e: KeyboardEvent) => {
       if (!canSteer) return
-      if (['arrowleft', 'arrowright', 'a', 'd'].includes(e.key.toLowerCase())) {
-        actions.setCarrierSteerInput(0)
+      const key = e.key.toLowerCase()
+      if (
+        [
+          'arrowleft',
+          'arrowright',
+          'arrowup',
+          'arrowdown',
+          'a',
+          'd',
+          'w',
+          's',
+        ].includes(key)
+      ) {
+        held.delete(key)
+        emitMove()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -148,28 +250,67 @@ export default function FootballSim() {
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      held.clear()
+      actionsRef.current.setMoveVector(0, 0)
     }
-  }, [actions, canSteer])
+  }, [canSteer])
+
+  useEffect(() => {
+    const key = `${state.lastResultSummary ?? ''}-${playAnimation.phase}`
+    if (!state.lastResultSummary || key === lastImpactRef.current) return
+    if (playAnimation.phase !== 'result' && playAnimation.phase !== 'tackleOrScore') return
+    lastImpactRef.current = key
+    const text = state.lastResultSummary.toLowerCase()
+    const bad = /intercept|fumble|sack|loss|miss|turnover|incomplete/.test(text)
+    const good = /touchdown|field goal|first down|gain|complete|\+\d/.test(text)
+    if (!bad && !good) return
+    const t0 = window.setTimeout(() => {
+      setFlash(bad ? 'bad' : 'good')
+      setShake(true)
+    }, 0)
+    const t1 = window.setTimeout(() => setShake(false), 360)
+    const t2 = window.setTimeout(() => setFlash('none'), 360)
+    return () => {
+      window.clearTimeout(t0)
+      window.clearTimeout(t1)
+      window.clearTimeout(t2)
+    }
+  }, [playAnimation.phase, state.lastResultSummary])
 
   if (state.phase === 'not_started') {
+    if (kickoffIntro) {
+      return <KickoffIntro kickoff={kickoffIntro} teams={teams} />
+    }
     return (
       <TitleAndTeamSelect
         selected={userTeamId}
+        teams={teams}
         onSelected={setUserTeamId}
-        onStart={actions.startGame}
+        onCycleTeam={cycleTeam}
+        onStart={startWithKickoff}
       />
     )
   }
 
   return (
-    <main className="gb-shell">
-      <Scoreboard state={state} />
-      <section className="gb-play-area">
+    <main
+      className="gb-shell"
+      style={{
+        '--home': teams.home.color,
+        '--home-trim': teams.home.trim,
+        '--away': teams.away.color,
+        '--away-trim': teams.away.trim,
+      } as CSSProperties}
+    >
+      <Scoreboard state={state} teams={teams} />
+      <section className={`gb-play-area ${shake ? 'screen-shake' : ''}`}>
         <Field
           state={state}
           animation={playAnimation}
-          onReceiverTarget={actions.setPassTargetReceiver}
+          flash={flash}
+          onReceiverTarget={actions.throwTo}
         />
+        <PhaseBanner state={state} animation={playAnimation} />
         {state.lastResultSummary ? (
           <ResultBanner text={state.lastResultSummary} />
         ) : null}
@@ -186,26 +327,194 @@ export default function FootballSim() {
         onSnap={actions.snap}
         onAdvanceResult={actions.advanceResult}
         onReset={actions.resetGame}
-        onSteer={actions.setCarrierSteerInput}
-        onJuke={actions.juke}
-        onDive={actions.dive}
-        onReceiver={actions.selectReceiver}
+        onMoveVector={actions.setMoveVector}
+        onJuke={actions.secondaryAction}
+        onDive={actions.primaryAction}
+        onReceiver={() => actions.switchPlayer()}
       />
     </main>
   )
 }
 
+function KickoffIntro({
+  kickoff,
+  teams,
+}: {
+  kickoff: KickoffIntroState
+  teams: Record<FootballTeamSide, TeamMeta>
+}) {
+  const dir = kickoff.kickingTeam === 'home' ? 1 : -1
+  const ballXBase =
+    kickoff.phase === 'lineup'
+      ? 35
+      : kickoff.phase === 'kick'
+        ? 50
+        : kickoff.phase === 'return'
+          ? 70
+          : 78
+  const ballX = dir === 1 ? ballXBase : 100 - ballXBase
+  const ballY =
+    kickoff.phase === 'lineup'
+      ? 50
+      : kickoff.phase === 'kick'
+        ? 27
+        : kickoff.phase === 'return'
+          ? 60
+          : 62
+  const returnerX =
+    kickoff.phase === 'lineup' || kickoff.phase === 'kick'
+      ? dir === 1
+        ? 80
+        : 20
+      : kickoff.phase === 'return'
+        ? dir === 1
+          ? 65
+          : 35
+        : dir === 1
+          ? 55
+          : 45
+
+  return (
+    <main
+      className="gb-kickoff crt-scanlines"
+      style={{
+        '--home': teams.home.color,
+        '--home-trim': teams.home.trim,
+        '--away': teams.away.color,
+        '--away-trim': teams.away.trim,
+      } as CSSProperties}
+    >
+      <header className="gb-kickoff__hud">
+        <strong>Kickoff</strong>
+        <span>
+          {teams[kickoff.kickingTeam].abbr} kicks to{' '}
+          {teams[kickoff.receivingTeam].abbr}
+        </span>
+      </header>
+      <section className="gb-kickoff__field">
+        <div className="gb-kickoff__endzone gb-kickoff__endzone--home">HOME</div>
+        <div className="gb-kickoff__endzone gb-kickoff__endzone--away">AWAY</div>
+
+        {Array.from({ length: 11 }).map((_, index) => {
+          const x = (dir === 1 ? 30 : 70) + (index - 5) * 0.8
+          const y = 18 + index * 6
+          return (
+            <KickoffPlayer
+              key={`kick-${index}`}
+              side={kickoff.kickingTeam}
+              x={x}
+              y={y}
+              running={kickoff.phase !== 'lineup'}
+              facing={dir === 1 ? 'right' : 'left'}
+            />
+          )
+        })}
+
+        {Array.from({ length: 10 }).map((_, index) => {
+          const x = (dir === 1 ? 75 : 25) + (index - 5) * 0.5
+          const y = 22 + index * 6
+          return (
+            <KickoffPlayer
+              key={`recv-${index}`}
+              side={kickoff.receivingTeam}
+              x={x}
+              y={y}
+              running={kickoff.phase === 'return' || kickoff.phase === 'tackle'}
+              facing={dir === 1 ? 'left' : 'right'}
+            />
+          )
+        })}
+
+        <KickoffPlayer
+          side={kickoff.receivingTeam}
+          x={returnerX}
+          y={kickoff.phase === 'lineup' || kickoff.phase === 'kick' ? 50 : 60}
+          running={kickoff.phase === 'return'}
+          tackled={kickoff.phase === 'tackle'}
+          hasBall={kickoff.phase === 'return' || kickoff.phase === 'tackle'}
+          facing={dir === 1 ? 'left' : 'right'}
+        />
+
+        {kickoff.phase !== 'lineup' ? (
+          <span
+            className="gb-kickoff-ball"
+            style={{
+              left: `${ballX}%`,
+              top: `${ballY}%`,
+            }}
+          />
+        ) : null}
+
+        <div className="gb-kickoff__banner">
+          {kickoff.phase === 'lineup' && 'Lining up...'}
+          {kickoff.phase === 'kick' && 'Kick!'}
+          {kickoff.phase === 'return' && 'Return!'}
+          {kickoff.phase === 'tackle' && 'Tackled!'}
+        </div>
+      </section>
+      <footer className="gb-kickoff__footer">
+        Get ready: {teams[kickoff.receivingTeam].abbr} ball at the 25
+      </footer>
+    </main>
+  )
+}
+
+function KickoffPlayer({
+  side,
+  x,
+  y,
+  facing,
+  running,
+  tackled,
+  hasBall,
+}: {
+  side: FootballTeamSide
+  x: number
+  y: number
+  facing: 'left' | 'right'
+  running?: boolean
+  tackled?: boolean
+  hasBall?: boolean
+}) {
+  return (
+    <span
+      className={`gb-kickoff-player ${side} ${facing === 'left' ? 'face-left' : 'face-right'} ${running ? 'is-running' : ''} ${tackled ? 'is-tackled' : ''}`}
+      style={{ left: `${x}%`, top: `${y}%` }}
+    >
+      <span className="gb-player__shadow" />
+      <span className="gb-player__body">
+        <span className="gb-player__helmet" />
+        <span className="gb-player__torso" />
+        <span className="gb-player__legs" />
+        {hasBall ? <span className="gb-player__ball" /> : null}
+      </span>
+    </span>
+  )
+}
+
 function TitleAndTeamSelect({
   selected,
+  teams,
   onSelected,
+  onCycleTeam,
   onStart,
 }: {
   selected: FootballTeamSide
+  teams: Record<FootballTeamSide, TeamMeta>
   onSelected: (side: FootballTeamSide) => void
+  onCycleTeam: (side: FootballTeamSide, direction: 1 | -1) => void
   onStart: () => void
 }) {
   return (
-    <main className="gb-title">
+    <main
+      className="gb-title"
+      style={{
+        '--home': teams.home.color,
+        '--home-trim': teams.home.trim,
+        '--away': teams.away.color,
+        '--away-trim': teams.away.trim,
+      } as CSSProperties}
+    >
       <div className="gb-title__field" />
       <section className="gb-title__panel">
         <p className="gb-kicker">Insert Coin</p>
@@ -216,23 +525,44 @@ function TitleAndTeamSelect({
         <p className="gb-subtitle">Retro arcade football. Real plays. Fast drives.</p>
         <div className="gb-team-select" aria-label="Team selection">
           {(['home', 'away'] as const).map((side) => (
-            <button
+            <div
               key={side}
-              type="button"
               className={`gb-team-card ${selected === side ? 'is-selected' : ''}`}
-              onClick={() => onSelected(side)}
             >
               <span
                 className="gb-team-card__logo"
-                style={{ background: TEAM_META[side].color, color: TEAM_META[side].trim }}
+                style={{ background: teams[side].color, color: teams[side].trim }}
               >
-                {TEAM_META[side].abbr}
+                {teams[side].abbr}
               </span>
               <span>
-                <strong>{TEAM_META[side].name}</strong>
-                <small>{side === 'home' ? 'Home blues' : 'Away reds'}</small>
+                <strong>{teams[side].name}</strong>
+                <small>{teams[side].note}</small>
               </span>
-            </button>
+              <div className="gb-team-card__controls">
+                <button
+                  type="button"
+                  onClick={() => onCycleTeam(side, -1)}
+                  aria-label={`Previous ${side} team`}
+                >
+                  &lt;
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelected(side)}
+                  disabled={selected === side}
+                >
+                  {selected === side ? 'You' : 'Pick'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCycleTeam(side, 1)}
+                  aria-label={`Next ${side} team`}
+                >
+                  &gt;
+                </button>
+              </div>
+            </div>
           ))}
         </div>
         <button type="button" className="gb-start" onClick={onStart}>
@@ -243,11 +573,22 @@ function TitleAndTeamSelect({
   )
 }
 
-function Scoreboard({ state }: { state: FootballGameViewState }) {
+function Scoreboard({
+  state,
+  teams,
+}: {
+  state: FootballGameViewState
+  teams: Record<FootballTeamSide, TeamMeta>
+}) {
   const possessionHome = state.possessionTeamId === 'home'
   return (
     <header className="gb-scoreboard" aria-label="Scoreboard">
-      <TeamScore side="home" score={state.homeScore} hasBall={possessionHome} />
+      <TeamScore
+        side="home"
+        score={state.homeScore}
+        hasBall={possessionHome}
+        team={teams.home}
+      />
       <div className="gb-scoreboard__middle">
         <div>
           <span>Qtr</span>
@@ -256,6 +597,10 @@ function Scoreboard({ state }: { state: FootballGameViewState }) {
         <div>
           <span>Time</span>
           <strong>{formatClock(state.clockSeconds)}</strong>
+        </div>
+        <div>
+          <span>Play</span>
+          <strong>{Math.ceil(state.playClockSeconds).toString().padStart(2, '0')}</strong>
         </div>
         <div>
           <span>Down</span>
@@ -267,8 +612,17 @@ function Scoreboard({ state }: { state: FootballGameViewState }) {
           <span>Ball</span>
           <strong>{ballSpot(state)}</strong>
         </div>
+        <div>
+          <span>Clock</span>
+          <strong>{state.clockRunning ? 'Run' : 'Stop'}</strong>
+        </div>
       </div>
-      <TeamScore side="away" score={state.awayScore} hasBall={!possessionHome} />
+      <TeamScore
+        side="away"
+        score={state.awayScore}
+        hasBall={!possessionHome}
+        team={teams.away}
+      />
     </header>
   )
 }
@@ -277,19 +631,20 @@ function TeamScore({
   side,
   score,
   hasBall,
+  team,
 }: {
   side: FootballTeamSide
   score: number
   hasBall: boolean
+  team: TeamMeta
 }) {
-  const meta = TEAM_META[side]
   return (
     <div className="gb-team-score">
       <span
         className="gb-team-score__logo"
-        style={{ background: meta.color, color: meta.trim }}
+        style={{ background: team.color, color: team.trim }}
       >
-        {meta.abbr}
+        {team.abbr}
       </span>
       <span>
         <small>{side}</small>
@@ -303,10 +658,12 @@ function TeamScore({
 function Field({
   state,
   animation,
+  flash,
   onReceiverTarget,
 }: {
   state: FootballGameViewState
   animation: PlayAnimationSnapshot
+  flash: 'none' | 'good' | 'bad'
   onReceiverTarget: (receiverId: string) => void
 }) {
   const fieldRef = useRef<HTMLDivElement | null>(null)
@@ -420,7 +777,49 @@ function Field({
             ? ` vs ${animation.preSnapPreview.labels.defense}`
             : ''}
         </div>
+        {flash !== 'none' ? <div className={`gb-impact-flash gb-impact-flash--${flash}`} /> : null}
       </div>
+    </div>
+  )
+}
+
+function PhaseBanner({
+  state,
+  animation,
+}: {
+  state: FootballGameViewState
+  animation: PlayAnimationSnapshot
+}) {
+  let label: string | null = null
+  let tone: 'info' | 'good' | 'bad' | 'neutral' = 'info'
+
+  if (animation.phase === 'preSnap') {
+    label =
+      state.possessionTeamId === state.userTeamId
+        ? `Offense: ${animation.preSnapPreview?.labels.offense ?? 'pick a play'}`
+        : `Defense: ${animation.preSnapPreview?.labels.defense ?? 'call the D'}`
+  } else if (animation.phase === 'snap') {
+    label = 'Hut! Hut!'
+  } else if (animation.phase === 'playInProgress') {
+    label = state.possessionTeamId === state.userTeamId ? 'Go!' : 'Ball is live'
+  } else if (animation.phase === 'tackleOrScore') {
+    label = 'Whistle'
+    tone = 'neutral'
+  } else if (animation.phase === 'result' && state.lastResultSummary) {
+    const text = state.lastResultSummary.toLowerCase()
+    label = state.lastResultSummary
+    tone = /touchdown|field goal|first down|gain|complete|\+\d/.test(text)
+      ? 'good'
+      : /turnover|intercept|fumble|sack|loss|miss/.test(text)
+        ? 'bad'
+        : 'neutral'
+  }
+
+  if (!label) return null
+
+  return (
+    <div className={`gb-phase-banner gb-phase-banner--${tone}`} role="status">
+      {label}
     </div>
   )
 }
@@ -523,6 +922,7 @@ function PlayerToken({
   onTarget: () => void
 }) {
   const hasBall = animation.ball.carrierId === player.id
+  const isActive = animation.activePlayerId === player.id
   const side = player.teamId
   const role = roleLabel(player)
   const motion = playerMotionClass(player, animation.phase)
@@ -532,7 +932,7 @@ function PlayerToken({
   return (
     <button
       type="button"
-      className={`gb-player ${side} ${motion} ${facingClass(player)} ${hasBall ? 'has-ball' : ''} ${targetClass}`}
+      className={`gb-player ${side} ${motion} ${facingClass(player)} ${hasBall ? 'has-ball' : ''} ${isActive ? 'is-active' : ''} ${targetClass}`}
       style={{
         left: `${xPct(player.x)}%`,
         top: `${yPct(player.y)}%`,
@@ -590,7 +990,7 @@ function ControlDeck({
   onSnap,
   onAdvanceResult,
   onReset,
-  onSteer,
+  onMoveVector,
   onJuke,
   onDive,
   onReceiver,
@@ -606,7 +1006,7 @@ function ControlDeck({
   onSnap: () => void
   onAdvanceResult: () => void
   onReset: () => void
-  onSteer: (steer: number) => void
+  onMoveVector: (x: number, y: number) => void
   onJuke: () => void
   onDive: () => void
   onReceiver: () => void
@@ -619,10 +1019,11 @@ function ControlDeck({
   if (live && userOnOffense) {
     return (
       <section className="gb-controls gb-controls--live">
-        <DPad onSteer={onSteer} />
+        <DPad onMoveVector={onMoveVector} />
         <div className="gb-live-hint">
-          <strong>{animation.legal.canSelectReceiver ? 'Tap receiver or cycle target' : 'Run the lane'}</strong>
-          <span>A/D or arrows steer. J jukes. Space dives.</span>
+          <strong>{animation.legal.canSelectReceiver ? 'Target, move, throw' : 'Run the lane'}</strong>
+          <span>WASD moves. R switches. J jukes. Space dives.</span>
+          <small>Active: {animation.activePlayerId ?? 'none'}</small>
         </div>
         <div className="gb-action-cluster">
           <button type="button" onClick={onReceiver} disabled={!animation.legal.canSelectReceiver}>
@@ -635,6 +1036,18 @@ function ControlDeck({
             Dive
           </button>
         </div>
+      </section>
+    )
+  }
+
+  if (live && !userOnOffense) {
+    return (
+      <section className="gb-controls gb-controls--watching">
+        <strong>AI offense</strong>
+        <span>
+          Watching the play. Your call:{' '}
+          {animation.selectedDefensiveCallId ?? selectedDefensiveCallId ?? 'defense'}
+        </span>
       </section>
     )
   }
@@ -731,22 +1144,28 @@ function PlayPicker({
   )
 }
 
-function DPad({ onSteer }: { onSteer: (steer: number) => void }) {
-  const stop = useCallback(() => onSteer(0), [onSteer])
+function DPad({ onMoveVector }: { onMoveVector: (x: number, y: number) => void }) {
+  const stop = useCallback(() => onMoveVector(0, 0), [onMoveVector])
   const press = useCallback(
-    (steer: number) => (event: PointerEvent<HTMLButtonElement>) => {
+    (x: number, y: number) => (event: PointerEvent<HTMLButtonElement>) => {
       event.currentTarget.setPointerCapture(event.pointerId)
-      onSteer(steer)
+      onMoveVector(x, y)
     },
-    [onSteer],
+    [onMoveVector],
   )
   return (
-    <div className="gb-dpad" aria-label="Ball carrier steering">
-      <button type="button" onPointerDown={press(-1)} onPointerUp={stop} onPointerCancel={stop}>
-        Left
+    <div className="gb-dpad" aria-label="Active player movement">
+      <button type="button" className="gb-dpad__up" onPointerDown={press(0, -1)} onPointerUp={stop} onPointerCancel={stop}>
+        W
       </button>
-      <button type="button" onPointerDown={press(1)} onPointerUp={stop} onPointerCancel={stop}>
-        Right
+      <button type="button" className="gb-dpad__left" onPointerDown={press(-1, 0)} onPointerUp={stop} onPointerCancel={stop}>
+        A
+      </button>
+      <button type="button" className="gb-dpad__right" onPointerDown={press(1, 0)} onPointerUp={stop} onPointerCancel={stop}>
+        D
+      </button>
+      <button type="button" className="gb-dpad__down" onPointerDown={press(0, 1)} onPointerUp={stop} onPointerCancel={stop}>
+        S
       </button>
     </div>
   )

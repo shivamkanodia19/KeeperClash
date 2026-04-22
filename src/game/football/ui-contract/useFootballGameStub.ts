@@ -54,6 +54,23 @@ const stubActions: FootballGameActions = {
     void steer
   },
 
+  setMoveVector: (x: number, y: number) => {
+    void x
+    void y
+  },
+
+  switchPlayer: (target?: string | number) => {
+    void target
+  },
+
+  primaryAction: noop,
+
+  secondaryAction: noop,
+
+  throwTo: (receiverId: string) => {
+    void receiverId
+  },
+
   setPassTargetReceiver: (receiverId: string) => {
     void receiverId
   },

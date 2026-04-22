@@ -1,5 +1,9 @@
 import type { FootballGameState } from '../footballTypes'
-import { DEFAULT_QUARTER_LENGTH_SECONDS, QUARTER_LENGTH_OPTIONS } from '../footballTypes'
+import {
+  DEFAULT_PLAY_CLOCK_SECONDS,
+  DEFAULT_QUARTER_LENGTH_SECONDS,
+  QUARTER_LENGTH_OPTIONS,
+} from '../footballTypes'
 import type { PlayAnimationPhase } from '../playAnimation/types'
 import type {
   FootballGamePhase,
@@ -79,6 +83,10 @@ export function toFootballGameViewState(
       awayScore: 0,
       quarter: 1,
       clockSeconds: 0,
+      clockRunning: false,
+      playClockSeconds: DEFAULT_PLAY_CLOCK_SECONDS,
+      clockMode: 'stopped',
+      lastClockEvent: null,
       quarterLengthSeconds: DEFAULT_QUARTER_LENGTH_SECONDS,
       quarterLengthOptions: [...QUARTER_LENGTH_OPTIONS],
       possessionTeamId: 'home',
@@ -108,6 +116,10 @@ export function toFootballGameViewState(
     awayScore: engine.awayScore,
     quarter: engine.quarter,
     clockSeconds: engine.clockSeconds,
+    clockRunning: engine.clockRunning,
+    playClockSeconds: engine.playClockSeconds,
+    clockMode: engine.clockMode,
+    lastClockEvent: engine.lastClockEvent,
     quarterLengthSeconds: engine.quarterLengthSeconds,
     quarterLengthOptions: [...QUARTER_LENGTH_OPTIONS],
     possessionTeamId: engine.possession,

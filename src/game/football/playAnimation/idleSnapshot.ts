@@ -39,5 +39,9 @@ export function idlePlayAnimationSnapshot(): PlayAnimationSnapshot {
     selectedDefenderId: null,
     controllableDefenderCandidates: [],
     defensiveControlEnabled: false,
+    activePlayerId: null,
+    controllablePlayerIds: [],
+    controlMode: 'none',
+    inputHints: [],
   }
 }

@@ -22,7 +22,9 @@ export {
   selectReceiver,
   setCarrierSteerInput,
   setPassTargetReceiver,
+  setPlayerMoveVector,
   snap,
+  switchActivePlayer,
   toPlayAnimationSnapshot,
 } from './playAnimationMachine'
 export type { PlayAnimationCore } from './playAnimationMachine'

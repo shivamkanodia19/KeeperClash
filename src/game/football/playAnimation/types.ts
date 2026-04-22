@@ -111,4 +111,8 @@ export type PlayAnimationSnapshot = {
   controllableDefenderCandidates: readonly string[]
   /** Future: user steers a defender post-snap. */
   defensiveControlEnabled: boolean
+  activePlayerId: string | null
+  controllablePlayerIds: readonly string[]
+  controlMode: 'none' | 'offense' | 'defense_preview'
+  inputHints: readonly string[]
 }

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { createTestScrimmageState } from '../footballState'
 import {
+  advancePlaySimulationFrame,
   advanceResult,
   animationSeed,
   createPlayAnimationCore,
   moveBallCarrier,
+  setPlayerMoveVector,
   snap,
+  switchActivePlayer,
 } from './playAnimationMachine'
 
 describe('playAnimationMachine', () => {
@@ -44,5 +47,31 @@ describe('playAnimationMachine', () => {
 
     const cleared = advanceResult(after!, applied)
     expect(cleared?.phase).toBe('preSnap')
+  })
+
+  it('active player starts on carrier and move vector changes path', () => {
+    const engine = createTestScrimmageState()
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'inside_zone', 'cover_2_zone')
+    expect(s0).not.toBeNull()
+    core = s0!.core
+    expect(core.activePlayerId).toBe(core.ball.carrierId)
+
+    const startY = core.ball.y
+    core = setPlayerMoveVector(core, 0, 1)
+    const moved = advancePlaySimulationFrame(core, 260)
+    expect(moved).not.toBeNull()
+    expect(moved!.ball.y).toBeGreaterThan(startY)
+  })
+
+  it('switchPlayer cycles pass targets', () => {
+    const engine = createTestScrimmageState()
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'quick_slants', 'cover_2_zone')
+    expect(s0).not.toBeNull()
+    core = s0!.core
+    const switched = switchActivePlayer(core)
+    expect(switched).not.toBeNull()
+    expect(switched!.activePlayerId).not.toBe(core.activePlayerId)
   })
 })

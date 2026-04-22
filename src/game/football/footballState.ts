@@ -1,6 +1,7 @@
 import type {
   Down,
   FootballGameState,
+  GameClockMode,
   PlayResolution,
   Quarter,
   TeamId,
@@ -9,6 +10,7 @@ import type {
 import {
   DEFAULT_AWAY_RATINGS,
   DEFAULT_HOME_RATINGS,
+  DEFAULT_PLAY_CLOCK_SECONDS,
   DEFAULT_QUARTER_LENGTH_SECONDS,
 } from './footballTypes'
 import { getDefensiveCall } from './defensiveCalls'
@@ -27,6 +29,44 @@ function yardsToGoAfterFirstDown(yardLine: number): number {
 
 function mirrorField(yardLine: number): number {
   return clampLine(100 - yardLine)
+}
+
+function readyForPlayClockState(
+  mode: GameClockMode = 'pre_snap_stopped',
+): Pick<FootballGameState, 'clockRunning' | 'clockMode' | 'playClockSeconds'> {
+  return {
+    clockRunning: mode === 'pre_snap_running' || mode === 'live',
+    clockMode: mode,
+    playClockSeconds: DEFAULT_PLAY_CLOCK_SECONDS,
+  }
+}
+
+function clockEventForResolution(resolution: PlayResolution): {
+  mode: GameClockMode
+  event: string
+} {
+  switch (resolution.outcome) {
+    case 'normal':
+    case 'sack':
+      return { mode: 'pre_snap_running', event: 'Clock running after in-bounds play.' }
+    case 'incomplete':
+      return { mode: 'pre_snap_stopped', event: 'Clock stopped on incomplete pass.' }
+    case 'touchdown':
+      return { mode: 'pre_snap_stopped', event: 'Clock stopped after touchdown.' }
+    case 'field_goal_made':
+      return { mode: 'pre_snap_stopped', event: 'Clock stopped after made field goal.' }
+    case 'field_goal_miss':
+      return { mode: 'pre_snap_stopped', event: 'Clock stopped after missed field goal.' }
+    case 'punt':
+      return { mode: 'pre_snap_stopped', event: 'Clock stopped after punt.' }
+    case 'interception':
+    case 'fumble_lost':
+      return { mode: 'pre_snap_stopped', event: 'Clock stopped after turnover.' }
+    case 'turnover_on_downs':
+      return { mode: 'pre_snap_stopped', event: 'Clock stopped after turnover on downs.' }
+    default:
+      return { mode: 'pre_snap_stopped', event: 'Clock stopped.' }
+  }
 }
 
 /** Exported for tests — advances quarter clock and sets `gameOver` when Q4 expires. */
@@ -54,6 +94,71 @@ export function applyClock(
   return { quarter: q, clockSeconds: Math.max(0, c), gameOver: false }
 }
 
+export function applyRealtimeClock(
+  state: FootballGameState,
+  dtSeconds: number,
+  mode: GameClockMode = state.clockMode,
+): FootballGameState {
+  if (state.gameOver) return state
+
+  const dt = Math.max(0, dtSeconds)
+  const gameClockRuns = mode === 'live' || mode === 'pre_snap_running'
+  const playClockRuns = mode === 'pre_snap_running' || mode === 'pre_snap_stopped'
+
+  let next: FootballGameState = {
+    ...state,
+    clockRunning: gameClockRuns,
+    clockMode: mode,
+  }
+
+  if (playClockRuns) {
+    const playClockSeconds = Math.max(0, state.playClockSeconds - dt)
+    next.playClockSeconds = playClockSeconds
+    if (state.playClockSeconds > 0 && playClockSeconds <= 0) {
+      next.lastClockEvent = 'Play clock expired.'
+    }
+  }
+
+  if (!gameClockRuns || dt <= 0) return next
+
+  const prevQuarter = state.quarter
+  const tick = applyClock(next, dt)
+  next = {
+    ...next,
+    ...tick,
+    clockRunning: !tick.gameOver && gameClockRuns,
+    clockMode: tick.gameOver ? 'stopped' : mode,
+    sessionPhase: tick.gameOver ? 'game_over' : next.sessionPhase,
+  }
+
+  if (tick.gameOver) {
+    next.lastClockEvent = 'Final whistle.'
+    return next
+  }
+
+  if (tick.quarter !== prevQuarter) {
+    next.lastClockEvent = `Quarter ${prevQuarter} ended.`
+    next.playClockSeconds = DEFAULT_PLAY_CLOCK_SECONDS
+    if (prevQuarter === 2 && tick.quarter === 3 && state.openingKickIsHome != null) {
+      const secondHalfReceiver: TeamId = state.openingKickIsHome ? 'home' : 'away'
+      next = {
+        ...next,
+        ...kickoffReceiveState(secondHalfReceiver),
+        clockRunning: false,
+        clockMode: 'pre_snap_stopped',
+        sessionPhase: 'play_calling',
+        kickoffContext: 'none',
+        playLog: [
+          ...next.playLog,
+          `Halftime kickoff: ${secondHalfReceiver === 'home' ? 'Home' : 'Away'} receives at own 25.`,
+        ].slice(-80),
+      }
+    }
+  }
+
+  return next
+}
+
 function other(team: TeamId): TeamId {
   return team === 'home' ? 'away' : 'home'
 }
@@ -76,6 +181,10 @@ export function createPregameFootballState(): FootballGameState {
     awayScore: 0,
     quarter: 1,
     clockSeconds: DEFAULT_QUARTER_LENGTH_SECONDS,
+    clockRunning: false,
+    playClockSeconds: DEFAULT_PLAY_CLOCK_SECONDS,
+    clockMode: 'stopped',
+    lastClockEvent: null,
     quarterLengthSeconds: DEFAULT_QUARTER_LENGTH_SECONDS,
     possession: 'home',
     yardLine: 25,
@@ -116,6 +225,8 @@ export function createLiveStateAfterOpeningKickoff(
     awayScore: 0,
     quarter: 1,
     clockSeconds: ql,
+    ...readyForPlayClockState('pre_snap_stopped'),
+    lastClockEvent: 'Opening kickoff placed at the 25.',
     quarterLengthSeconds: ql,
     ...kickoffReceiveState(p.receivingTeam),
     gameOver: false,
@@ -138,6 +249,8 @@ export function createTestScrimmageState(): FootballGameState {
     awayScore: 0,
     quarter: 1,
     clockSeconds: DEFAULT_QUARTER_LENGTH_SECONDS,
+    ...readyForPlayClockState('pre_snap_stopped'),
+    lastClockEvent: null,
     quarterLengthSeconds: DEFAULT_QUARTER_LENGTH_SECONDS,
     possession: 'home',
     yardLine: 25,
@@ -178,19 +291,17 @@ export function applyResolvedPlay(
     throw new Error('Cannot apply play to a finished game.')
   }
 
-  let next: FootballGameState = {
+  const next: FootballGameState = {
     ...state,
     playLog: [...state.playLog, resolution.commentary].slice(-80),
   }
 
-  const prevQuarter = state.quarter
-  const clockTick = applyClock(next, resolution.clockUsed)
-  next = { ...next, ...clockTick }
-
-  const crossedHalftime = prevQuarter === 2 && next.quarter === 3
-
   const offenseTeam = state.possession
   const scoringTeam = offenseTeam
+  const nextClock = clockEventForResolution(resolution)
+  Object.assign(next, readyForPlayClockState(nextClock.mode), {
+    lastClockEvent: nextClock.event,
+  })
 
   const addScore = (team: TeamId, pts: number) => {
     if (team === 'home') next.homeScore += pts
@@ -250,6 +361,13 @@ export function applyResolvedPlay(
       next.yardsToGo = yardsToGoAfterFirstDown(next.yardLine)
       break
     }
+    case 'turnover_on_downs': {
+      next.possession = other(offenseTeam)
+      next.yardLine = mirrorField(state.yardLine)
+      next.down = 1
+      next.yardsToGo = yardsToGoAfterFirstDown(next.yardLine)
+      break
+    }
     case 'sack':
     case 'incomplete':
     case 'normal': {
@@ -277,6 +395,9 @@ export function applyResolvedPlay(
         next.yardLine = mirrorField(line)
         next.down = 1
         next.yardsToGo = yardsToGoAfterFirstDown(next.yardLine)
+        Object.assign(next, readyForPlayClockState('pre_snap_stopped'), {
+          lastClockEvent: 'Clock stopped after turnover on downs.',
+        })
         next.playLog = [...next.playLog, 'Turnover on downs.'].slice(-80)
       } else {
         next.yardLine = line
@@ -287,20 +408,6 @@ export function applyResolvedPlay(
     }
     default:
       break
-  }
-
-  if (crossedHalftime && state.openingKickIsHome != null) {
-    const secondHalfReceiver: TeamId = state.openingKickIsHome ? 'home' : 'away'
-    next.possession = secondHalfReceiver
-    next.yardLine = 25
-    next.down = 1
-    next.yardsToGo = 10
-    next.sessionPhase = 'play_calling'
-    next.kickoffContext = 'none'
-    const recv = secondHalfReceiver === 'home' ? 'Home' : 'Away'
-    next.playLog = [...next.playLog, `Halftime kickoff: ${recv} receives at own 25.`].slice(
-      -80,
-    )
   }
 
   return next

@@ -13,23 +13,23 @@ export function deriveCameraRecommendation(opts: {
     return {
       viewportCenterX: los + 7,
       viewportCenterY: 0,
-      zoom: 1.12,
-      visibleXMin: Math.max(1, los - 14),
-      visibleXMax: Math.min(99, los + 22),
-      visibleYMin: -28,
-      visibleYMax: 28,
+      zoom: 1.2,
+      visibleXMin: Math.max(1, los - 12),
+      visibleXMax: Math.min(99, los + 20),
+      visibleYMin: -26,
+      visibleYMax: 26,
       focusMode: 'los_wide',
     }
   }
-  const pull = opts.playProgress01 * 6
+  const pull = opts.playProgress01 * 5
   return {
     viewportCenterX: opts.ball.x + pull * 0.12,
     viewportCenterY: opts.ball.y * 0.42,
-    zoom: 1.28,
-    visibleXMin: Math.max(1, opts.ball.x - 16),
-    visibleXMax: Math.min(99, opts.ball.x + 24),
-    visibleYMin: -22,
-    visibleYMax: 22,
+    zoom: 1.38,
+    visibleXMin: Math.max(1, opts.ball.x - 13),
+    visibleXMax: Math.min(99, opts.ball.x + 19),
+    visibleYMin: -20,
+    visibleYMax: 20,
     focusMode: 'ball_follow',
   }
 }

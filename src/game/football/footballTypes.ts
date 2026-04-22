@@ -101,11 +101,23 @@ export type GameSessionPhase =
 
 export type KickoffContext = 'none' | 'opening' | 'halftime' | 'after_score'
 
+export type GameClockMode =
+  | 'stopped'
+  | 'pre_snap_running'
+  | 'pre_snap_stopped'
+  | 'live'
+
 export type FootballGameState = {
   homeScore: number
   awayScore: number
   quarter: Quarter
   clockSeconds: number
+  /** True when the game clock should drain from elapsed frame time. */
+  clockRunning: boolean
+  /** Real-time ready-for-play clock; drains before the snap. */
+  playClockSeconds: number
+  clockMode: GameClockMode
+  lastClockEvent: string | null
   /** Arcade quarter length (60 / 120 / 180 / 300). */
   quarterLengthSeconds: number
   possession: TeamId
@@ -126,6 +138,8 @@ export type FootballGameState = {
 
 /** Default arcade pacing: 2 minutes. */
 export const DEFAULT_QUARTER_LENGTH_SECONDS = 120
+
+export const DEFAULT_PLAY_CLOCK_SECONDS = 25
 
 /** Supported quarter lengths (seconds). */
 export const QUARTER_LENGTH_OPTIONS = [60, 120, 180, 300] as const
