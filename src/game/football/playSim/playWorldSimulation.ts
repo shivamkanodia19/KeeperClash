@@ -877,7 +877,7 @@ export function stepPlayWorld(
     for (const d of w.players.filter((x) => x.unit === 'defense')) {
       const dist = Math.hypot(d.x - ballCarrier.x, d.y - ballCarrier.y)
       if (d.phase === 'blockEngaged' && dist > 0.58) continue
-      if (dist < 0.52) {
+      if (dist < PLAY_FEEL.contact.tackleRadius || d.tackleIntentTimer > 0) {
         const breakTackle =
           ballCarrier.agility * 0.45 + ballCarrier.strength * 0.25 - d.strength * 0.22
         const intentBonus = d.tackleIntentTimer > 0 ? 0.18 : 0
