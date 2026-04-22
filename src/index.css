@@ -99,3 +99,82 @@ body {
 .overlay button:hover {
   filter: brightness(1.06);
 }
+
+.football-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  background: rgba(6, 14, 36, 0.55);
+}
+
+.football-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.football-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  color: #cfe6ff;
+}
+
+.football-controls select {
+  min-width: 200px;
+  padding: 0.45rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: #0f1f44;
+  color: #f7fbff;
+}
+
+.football-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.football-actions button {
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  border: 0;
+  background: #31d68f;
+  color: #042318;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.football-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.football-actions button:last-of-type {
+  background: #3a7afe;
+  color: #f7fbff;
+}
+
+.football-hint {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #9fd9ff;
+}
+
+.football-log {
+  font-size: 0.88rem;
+}
+
+.football-log-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.football-log-list li {
+  margin: 0.15rem 0;
+}
