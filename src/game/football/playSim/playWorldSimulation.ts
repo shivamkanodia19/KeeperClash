@@ -712,7 +712,7 @@ function passStep(
 
   if (w.passStage === 'qbCarry') {
     w.passTimer += dt
-    if (w.passTimer > 0.32 && tgt) {
+    if (w.passTimer > PLAY_FEEL.pass.qbAutoThrowSeconds && tgt) {
       w.passStage = 'inFlight'
       w.ball.mode = 'thrown'
       w.ball.throwTargetId = tgt.id
@@ -720,7 +720,11 @@ function passStep(
       const dx = tgt.x - w.ball.x
       const dy = tgt.y - w.ball.y
       const dist = Math.hypot(dx, dy) || 1
-      const flight = clamp(dist * 0.055, 0.38, 0.62)
+      const flight = clamp(
+        dist * PLAY_FEEL.pass.flightSecondsPerYard,
+        PLAY_FEEL.pass.minFlightSeconds,
+        PLAY_FEEL.pass.maxFlightSeconds,
+      )
       w.ball.vx = dx / flight
       w.ball.vy = dy / flight
       w.ball.vz = 2.4 / flight
@@ -761,7 +765,7 @@ function passStep(
         w.finished = true
         return w
       }
-      if (outcome === 'interception' && nearestDef && nd < CATCH_RADIUS + 1.1) {
+      if (outcome === 'interception' && nearestDef && nd < PLAY_FEEL.pass.interceptRadius + 0.7) {
         w.passStage = 'intercepted'
         w.ball.carrierId = nearestDef.id
         w.ball.mode = 'carried'
@@ -772,7 +776,7 @@ function passStep(
         w.lastWhistleReason = 'interception'
         return w
       }
-      if (distTgt < CATCH_RADIUS + 0.35 && tgt) {
+      if (distTgt < CATCH_RADIUS + 0.45 && tgt) {
         w.passStage = 'received'
         w.ball.carrierId = tgt.id
         w.ball.mode = 'carried'

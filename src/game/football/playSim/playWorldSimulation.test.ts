@@ -5,6 +5,7 @@ import { getOffensivePlay } from '../playDefinitions'
 import { layoutPlayersAtLos } from '../playAnimation/layout'
 import {
   createPlayWorldFromSnap,
+  setWorldPrimaryTarget,
   stepPlayWorld,
   syncWorldToField,
   SUBSTEP_DT,
@@ -376,5 +377,58 @@ describe('playWorldSimulation', () => {
     const next = stepPlayWorld(world, SUBSTEP_DT, { carrierSteer: 0 }, resolution)
     expect(next.lastWhistleReason).toBeNull()
     expect(next).toHaveProperty('lastWhistleReason')
+  })
+
+  it('pass target selection changes the receiver who can catch the ball', () => {
+    const engine = createTestScrimmageState()
+    const rng = createSeededRng(31)
+    const { resolution, committedPlayIds } = advanceDrive(
+      engine,
+      { userOffensePlayId: 'quick_slants' },
+      rng,
+    )
+    const off = getOffensivePlay('quick_slants')!
+    const def = getDefensiveCall(committedPlayIds.defenseCallId)
+    const setup = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      def?.visualTemplateId ?? 'four_three_base',
+    )
+    let world = createPlayWorldFromSnap({
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: Math.max(5, resolution.yardsGained),
+      offensePlayId: 'quick_slants',
+      defenseCallId: 'cover_2_zone',
+      layoutPlayers: setup.players,
+      ball: setup.ball,
+      resolution: { ...resolution, outcome: 'normal', yardsGained: 6 },
+    })
+    const targets = world.players.filter(
+      (p) => p.unit === 'offense' && (p.role === 'WR' || p.role === 'TE'),
+    )
+    expect(targets.length).toBeGreaterThan(1)
+    world = setWorldPrimaryTarget(world, targets[1]!.id)
+
+    for (
+      let i = 0;
+      i < 160 && !world.finished && world.ball.carrierId !== targets[1]!.id;
+      i++
+    ) {
+      world = stepPlayWorld(
+        world,
+        SUBSTEP_DT,
+        { carrierSteer: 0 },
+        {
+          ...resolution,
+          outcome: 'normal',
+          yardsGained: 6,
+        },
+      )
+    }
+
+    expect(world.ball.carrierId).toBe(targets[1]!.id)
+    expect(world.passStage).toBe('received')
   })
 })

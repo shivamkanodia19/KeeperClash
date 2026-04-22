@@ -117,6 +117,33 @@ describe('playAnimationMachine', () => {
     expect(core.activePlayerId).toBe(core.ball.carrierId)
   })
 
+  it('throwTo target keeps QB control until the selected receiver catches', () => {
+    const engine = createTestScrimmageState()
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'quick_slants', 'cover_2_zone')
+    expect(s0).not.toBeNull()
+    core = s0!.core
+    const target = core.players.find(
+      (p) => p.unit === 'offense' && /_wr\d/i.test(p.id) && p.id !== core.ball.throwTargetId,
+    )
+    expect(target).toBeDefined()
+
+    core = switchActivePlayer(core, target!.id, 'offense')!
+    expect(core.ball.throwTargetId).toBe(target!.id)
+    expect(core.activePlayerId).toBe(core.ball.carrierId)
+
+    for (
+      let i = 0;
+      i < 180 && core.ball.carrierId !== target!.id && core.phase !== 'tackleOrScore';
+      i++
+    ) {
+      core = advancePlaySimulationFrame(core, 33)!
+    }
+
+    expect(core.ball.carrierId).toBe(target!.id)
+    expect(core.activePlayerId).toBe(target!.id)
+  })
+
   it('defensive control can select and steer a defender', () => {
     const engine = {
       ...createTestScrimmageState(),
