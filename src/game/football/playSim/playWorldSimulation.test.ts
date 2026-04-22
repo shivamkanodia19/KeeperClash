@@ -82,4 +82,89 @@ describe('playWorldSimulation', () => {
     const { animatedYards, ball: b } = syncWorldToField(world)
     expect(Math.abs(animatedYards - (b.x - los))).toBeLessThan(0.001)
   })
+
+  it('live tuning keeps players readable over one second', () => {
+    const engine = createTestScrimmageState()
+    const rng = createSeededRng(15)
+    const { resolution, committedPlayIds } = advanceDrive(
+      engine,
+      { userOffensePlayId: 'inside_zone' },
+      rng,
+    )
+    const off = getOffensivePlay('inside_zone')!
+    const def = getDefensiveCall(committedPlayIds.defenseCallId)
+    const { players, ball } = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      def?.visualTemplateId ?? 'four_three_base',
+    )
+    let world = createPlayWorldFromSnap({
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: resolution.yardsGained,
+      offensePlayId: 'inside_zone',
+      defenseCallId: committedPlayIds.defenseCallId,
+      layoutPlayers: players,
+      ball,
+      resolution,
+    })
+    const startX = world.ball.x
+
+    for (let i = 0; i < 60; i++) {
+      world = stepPlayWorld(world, SUBSTEP_DT, { carrierSteer: 0 }, resolution)
+    }
+
+    expect(world.ball.x - startX).toBeGreaterThan(0.75)
+    expect(world.ball.x - startX).toBeLessThan(7)
+  })
+
+  it('active ball carrier input creates a different lateral lane', () => {
+    const engine = createTestScrimmageState()
+    const rng = createSeededRng(16)
+    const { resolution, committedPlayIds } = advanceDrive(
+      engine,
+      { userOffensePlayId: 'inside_zone' },
+      rng,
+    )
+    const off = getOffensivePlay('inside_zone')!
+    const def = getDefensiveCall(committedPlayIds.defenseCallId)
+    const setup = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      def?.visualTemplateId ?? 'four_three_base',
+    )
+    const baseParams = {
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: Math.max(5, resolution.yardsGained),
+      offensePlayId: 'inside_zone',
+      defenseCallId: committedPlayIds.defenseCallId,
+      layoutPlayers: setup.players,
+      ball: setup.ball,
+      resolution,
+    }
+    let left = createPlayWorldFromSnap(baseParams)
+    let right = createPlayWorldFromSnap(baseParams)
+    const carrierId = left.ball.carrierId
+    expect(carrierId).not.toBeNull()
+
+    for (let i = 0; i < 45; i++) {
+      left = stepPlayWorld(left, SUBSTEP_DT, {
+        carrierSteer: 0,
+        activePlayerId: carrierId,
+        moveX: 0,
+        moveY: -1,
+      }, resolution)
+      right = stepPlayWorld(right, SUBSTEP_DT, {
+        carrierSteer: 0,
+        activePlayerId: carrierId,
+        moveX: 0,
+        moveY: 1,
+      }, resolution)
+    }
+
+    expect(right.ball.y - left.ball.y).toBeGreaterThan(3)
+  })
 })

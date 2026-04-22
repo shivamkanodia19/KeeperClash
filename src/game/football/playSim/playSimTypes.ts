@@ -59,6 +59,11 @@ export type SimPlayer = {
   strength: number
   awareness: number
   assignment: string
+  assignmentTargetId: string | null
+  controlled: boolean
+  actionCooldown: number
+  tackleIntentTimer: number
+  shedBoostTimer: number
   phase: PlayerSimPhase
   routeWaypoints: SimWaypoint[]
   routeIndex: number
@@ -113,6 +118,7 @@ export type PlayWorldSimulation = {
   /** Target receiver id for throw / catch checks */
   primaryTargetId: string | null
   finished: boolean
+  lastWhistleReason: 'tackle' | 'score' | 'incomplete' | 'interception' | 'script_limit' | null
   /** Architecture: future user-controlled defender id */
   futureControllableDefenseId: string | null
 }

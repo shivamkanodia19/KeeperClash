@@ -2,6 +2,7 @@ import type { OffensiveFormationId, PlayResolution, TeamId } from '../footballTy
 import { getOffensivePlay } from '../playDefinitions'
 import type { BallFieldState, PlayerFieldPosition } from '../playAnimation/types'
 import { buildOffensivePreviewLines } from '../spatial/playRouteGeometry'
+import { PLAY_FEEL } from './playFeelConfig'
 import type {
   BallSimState,
   PassSimStage,
@@ -13,9 +14,9 @@ import type {
   SimWaypoint,
 } from './playSimTypes'
 
-const ENGAGE_RADIUS = 1.15
-const CATCH_RADIUS = 1.05
-const SUBSTEP_DT = 1 / 60
+const ENGAGE_RADIUS = PLAY_FEEL.contact.engageRadius
+const CATCH_RADIUS = PLAY_FEEL.pass.catchRadius
+const SUBSTEP_DT = PLAY_FEEL.substepDt
 
 export { SUBSTEP_DT }
 
@@ -216,6 +217,11 @@ function layoutToSimPlayers(
       strength: st.strength,
       awareness: st.awareness,
       assignment: category === 'run' && role === 'OL' ? 'run_lane' : 'default',
+      assignmentTargetId: null,
+      controlled: false,
+      actionCooldown: 0,
+      tackleIntentTimer: 0,
+      shedBoostTimer: 0,
       phase: initialPhaseFor(role, p.unit, category, defenseCallId),
       routeWaypoints,
       routeIndex: 0,
@@ -362,6 +368,7 @@ export function createPlayWorldFromSnap(p: CreatePlayWorldParams): PlayWorldSimu
     passTimer: 0,
     primaryTargetId,
     finished: Math.abs(p.signedTargetYards) < 0.05,
+    lastWhistleReason: null,
     futureControllableDefenseId: null,
   }
 }
@@ -527,10 +534,17 @@ function integrateVelocity(
   maxMul: number,
 ): { vx: number; vy: number; facingRad: number } {
   const engaged = Boolean(p.engagedWith || p.engagedBy)
-  const cap = p.maxSpeed * maxMul * (engaged ? 0.55 : 1)
+  const controlMul = p.controlled ? PLAY_FEEL.player.controlledSpeedMultiplier : 1
+  const cap =
+    p.maxSpeed *
+    PLAY_FEEL.player.globalSpeedMultiplier *
+    maxMul *
+    controlMul *
+    (engaged ? PLAY_FEEL.contact.blockSlowMultiplier : 1)
   const targetVx = ddx * cap
   const targetVy = ddy * cap
-  const maxDv = p.acceleration * dt
+  const accelMul = p.controlled ? PLAY_FEEL.player.controlledAccelerationMultiplier : 1
+  const maxDv = p.acceleration * accelMul * dt
   let nvx = p.vx + clamp(targetVx - p.vx, -maxDv, maxDv)
   let nvy = p.vy + clamp(targetVy - p.vy, -maxDv, maxDv)
   const sp = Math.hypot(nvx, nvy)
@@ -794,6 +808,14 @@ export function stepPlayWorld(
     time: world.time + dt,
     players: world.players.map((p) => ({ ...p })),
   }
+
+  w.players = w.players.map((p) => ({
+    ...p,
+    controlled: input.activePlayerId === p.id,
+    actionCooldown: Math.max(0, p.actionCooldown - dt),
+    tackleIntentTimer: Math.max(0, p.tackleIntentTimer - dt),
+    shedBoostTimer: Math.max(0, p.shedBoostTimer - dt),
+  }))
 
   if (w.playCategory === 'pass') {
     w = passStep(w, dt, resolution)
