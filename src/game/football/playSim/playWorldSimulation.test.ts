@@ -180,6 +180,96 @@ describe('playWorldSimulation', () => {
     expect(right.ball.y - left.ball.y).toBeGreaterThan(3)
   })
 
+  it('offensive linemen engage and slow defensive rushers', () => {
+    const engine = createTestScrimmageState()
+    const rng = createSeededRng(21)
+    const { resolution, committedPlayIds } = advanceDrive(
+      engine,
+      { userOffensePlayId: 'inside_zone' },
+      rng,
+    )
+    const off = getOffensivePlay('inside_zone')!
+    const def = getDefensiveCall(committedPlayIds.defenseCallId)
+    const { players, ball } = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      def?.visualTemplateId ?? 'four_three_base',
+    )
+    let world = createPlayWorldFromSnap({
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: Math.max(4, resolution.yardsGained),
+      offensePlayId: 'inside_zone',
+      defenseCallId: 'cover_2_zone',
+      layoutPlayers: players,
+      ball,
+      resolution,
+    })
+
+    for (let i = 0; i < 120 && !world.players.some((p) => p.phase === 'blockEngaged'); i++) {
+      world = stepPlayWorld(world, SUBSTEP_DT, { carrierSteer: 0 }, resolution)
+    }
+
+    const engaged = world.players.filter((p) => p.phase === 'blockEngaged')
+    expect(engaged.length).toBeGreaterThanOrEqual(2)
+    expect(engaged.every((p) => Math.hypot(p.vx, p.vy) < p.maxSpeed)).toBe(true)
+  })
+
+  it('controlled defender tackle can end a run before the scripted target', () => {
+    const engine = createTestScrimmageState()
+    const rng = createSeededRng(22)
+    const { resolution, committedPlayIds } = advanceDrive(
+      engine,
+      { userOffensePlayId: 'inside_zone' },
+      rng,
+    )
+    const off = getOffensivePlay('inside_zone')!
+    const def = getDefensiveCall(committedPlayIds.defenseCallId)
+    const setup = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      def?.visualTemplateId ?? 'four_three_base',
+    )
+    let world = createPlayWorldFromSnap({
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: 12,
+      offensePlayId: 'inside_zone',
+      defenseCallId: 'cover_2_zone',
+      layoutPlayers: setup.players,
+      ball: setup.ball,
+      resolution,
+    })
+    const defender = world.players.find((p) => p.unit === 'defense' && p.role === 'LB')!
+    const carrier = world.players.find((p) => p.id === world.ball.carrierId)!
+    world = {
+      ...world,
+      players: world.players.map((p) =>
+        p.id === defender.id
+          ? { ...p, x: carrier.x + 0.35, y: carrier.y + 0.3, tackleIntentTimer: 0.25 }
+          : p,
+      ),
+    }
+
+    world = stepPlayWorld(
+      world,
+      SUBSTEP_DT,
+      {
+        carrierSteer: 0,
+        activePlayerId: defender.id,
+        moveX: -1,
+        moveY: 0,
+      },
+      resolution,
+    )
+
+    expect(world.finished).toBe(true)
+    expect(world.lastWhistleReason).toBe('tackle')
+    expect(world.ball.x - world.yardLineAtSnap).toBeLessThan(12)
+  })
+
   it('runtime timers tick down each frame', () => {
     const engine = createTestScrimmageState()
     const rng = createSeededRng(17)

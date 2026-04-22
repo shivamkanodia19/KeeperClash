@@ -416,7 +416,7 @@ function computeDesiredMotion(
       const dx = oth.x - p.x
       const dy = oth.y - p.y
       const len = Math.hypot(dx, dy) || 1
-      return { dx: (dx / len) * 0.25, dy: (dy / len) * 0.25, maxMul: 0.22 }
+      return { dx: (dx / len) * 0.9, dy: (dy / len) * 0.9, maxMul: 3 }
     }
   }
 
@@ -572,11 +572,13 @@ function clamp(n: number, lo: number, hi: number): number {
 function tryEngagements(players: SimPlayer[]): SimPlayer[] {
   const ps = players.map((p) => ({ ...p }))
   const ol = ps.filter((p) => p.role === 'OL' && p.unit === 'offense')
-  const dl = ps.filter((p) => p.role === 'DL' && p.unit === 'defense')
+  const dl = ps.filter((p) => p.unit === 'defense' && (p.role === 'DL' || p.role === 'LB'))
+  const olEngageRadius = ENGAGE_RADIUS * 4
+  const supportEngageRadius = ENGAGE_RADIUS * 2.2
   for (const o of ol) {
     if (o.engagedWith) continue
     let best: SimPlayer | null = null
-    let bd = ENGAGE_RADIUS
+    let bd = olEngageRadius
     for (const d of dl) {
       if (d.engagedBy) continue
       const dist = Math.hypot(d.x - o.x, d.y - o.y)
@@ -585,7 +587,7 @@ function tryEngagements(players: SimPlayer[]): SimPlayer[] {
         best = d
       }
     }
-    if (best && bd < ENGAGE_RADIUS) {
+    if (best && bd < olEngageRadius) {
       o.engagedWith = best.id
       o.phase = 'blockEngaged'
       const di = ps.findIndex((x) => x.id === best!.id)
@@ -603,7 +605,7 @@ function tryEngagements(players: SimPlayer[]): SimPlayer[] {
   for (const b of blockers) {
     if (b.engagedWith) continue
     let best: SimPlayer | null = null
-    let bd = ENGAGE_RADIUS * 1.05
+    let bd = supportEngageRadius
     for (const lb of lbs) {
       if (lb.engagedBy) continue
       const dist = Math.hypot(lb.x - b.x, lb.y - b.y)
@@ -612,7 +614,7 @@ function tryEngagements(players: SimPlayer[]): SimPlayer[] {
         best = lb
       }
     }
-    if (best && bd < ENGAGE_RADIUS * 1.05) {
+    if (best && bd < supportEngageRadius) {
       b.engagedWith = best.id
       b.phase = 'blockEngaged'
       const di = ps.findIndex((x) => x.id === best!.id)
@@ -641,7 +643,8 @@ function applyEngagementPhysics(ps: SimPlayer[], dt: number): SimPlayer[] {
     let shedTimer = p.shedTimer + (oth.strength - p.strength) * 0.35 * dt
     let engagedWith: string | null = p.engagedWith
     let phase = p.phase
-    if (p.unit === 'defense' && shedTimer > 0.92 + oth.awareness * 0.25) {
+    const shedBoost = p.shedBoostTimer > 0 ? 0.3 : 0
+    if (p.unit === 'defense' && shedTimer > PLAY_FEEL.contact.shedBaseSeconds + oth.awareness * 0.25 - shedBoost) {
       engagedWith = null
       shedTimer = 0
       phase = 'passRush'
@@ -661,7 +664,7 @@ function applyEngagementPhysics(ps: SimPlayer[], dt: number): SimPlayer[] {
   return next.map((p) => {
     if (!p.engagedWith) return p
     const mate = next.find((x) => x.id === p.engagedWith)
-    if (!mate || !mate.engagedWith || mate.engagedWith !== p.id) {
+    if (!mate || (mate.engagedWith !== p.id && mate.engagedBy !== p.id)) {
       return { ...p, engagedWith: null, phase: resetBlockerPhase(p) }
     }
     return p
@@ -754,6 +757,7 @@ function passStep(
       if (outcome === 'incomplete' || outcome === 'sack') {
         w.passStage = 'incomplete'
         w.ball.mode = 'dead'
+        w.lastWhistleReason = 'incomplete'
         w.finished = true
         return w
       }
@@ -765,6 +769,7 @@ function passStep(
         w.players = w.players.map((p) =>
           p.id === nearestDef!.id ? { ...p, phase: 'carryBall' as PlayerSimPhase } : p,
         )
+        w.lastWhistleReason = 'interception'
         return w
       }
       if (distTgt < CATCH_RADIUS + 0.35 && tgt) {
@@ -792,6 +797,7 @@ function passStep(
         } else {
           w.passStage = 'incomplete'
           w.ball.mode = 'dead'
+          w.lastWhistleReason = 'incomplete'
           w.finished = true
         }
       }
@@ -874,7 +880,9 @@ export function stepPlayWorld(
       if (dist < 0.52) {
         const breakTackle =
           ballCarrier.agility * 0.45 + ballCarrier.strength * 0.25 - d.strength * 0.22
-        if (dist < 0.38 || breakTackle < 0.22) {
+        const intentBonus = d.tackleIntentTimer > 0 ? 0.18 : 0
+        if (dist < PLAY_FEEL.contact.tackleSecureRadius || breakTackle < 0.22 + intentBonus) {
+          w.lastWhistleReason = 'tackle'
           w.finished = true
           w.ball.mode = 'dead'
           w.players = w.players.map((p) =>
@@ -890,6 +898,7 @@ export function stepPlayWorld(
     for (const d of w.players.filter((x) => x.unit === 'defense')) {
       const dist = Math.hypot(d.x - ballCarrier.x, d.y - ballCarrier.y)
       if (dist < 0.48) {
+        w.lastWhistleReason = 'tackle'
         w.finished = true
         w.ball.mode = 'dead'
         return w
@@ -901,8 +910,14 @@ export function stepPlayWorld(
   const tgtX = w.yardLineAtSnap + w.signedTargetYards
   if (w.ball.mode === 'carried' && w.ball.carrierId) {
     const cx = w.ball.x
-    if (w.signedTargetYards >= 0 && cx >= tgtX - 0.45) w.finished = true
-    if (w.signedTargetYards < 0 && cx <= tgtX + 0.45) w.finished = true
+    if (w.signedTargetYards >= 0 && cx >= tgtX - 0.45) {
+      w.lastWhistleReason = w.ball.x >= 100 ? 'score' : 'script_limit'
+      w.finished = true
+    }
+    if (w.signedTargetYards < 0 && cx <= tgtX + 0.45) {
+      w.lastWhistleReason = w.ball.x >= 100 ? 'score' : 'script_limit'
+      w.finished = true
+    }
   }
 
   if (
@@ -918,12 +933,16 @@ export function stepPlayWorld(
         (w.signedTargetYards >= 0 && car.x >= line - 0.48) ||
         (w.signedTargetYards < 0 && car.x <= line + 0.48)
       ) {
+        w.lastWhistleReason = w.ball.x >= 100 ? 'score' : 'script_limit'
         w.finished = true
       }
     }
   }
 
-  if (w.time > 20) w.finished = true
+  if (w.time > 20) {
+    w.lastWhistleReason = 'script_limit'
+    w.finished = true
+  }
 
   return w
 }
@@ -977,6 +996,42 @@ export function applyCarrierDive(world: PlayWorldSimulation): PlayWorldSimulatio
     ...world,
     players: world.players.map((p) =>
       p.id === id ? { ...p, vx: p.vx + 2.2, maxSpeed: p.maxSpeed * 1.12 } : p,
+    ),
+  }
+}
+
+export function applyDefenderTackleIntent(
+  world: PlayWorldSimulation,
+  defenderId: string | null,
+): PlayWorldSimulation {
+  if (!defenderId) return world
+  return {
+    ...world,
+    players: world.players.map((p) =>
+      p.id === defenderId && p.unit === 'defense'
+        ? {
+            ...p,
+            tackleIntentTimer: PLAY_FEEL.action.tackleLungeSeconds,
+            actionCooldown: 0.35,
+            vx: p.vx + Math.cos(p.facingRad) * PLAY_FEEL.action.tackleLungeBoost,
+            vy: p.vy + Math.sin(p.facingRad) * PLAY_FEEL.action.tackleLungeBoost,
+          }
+        : p,
+    ),
+  }
+}
+
+export function applyDefenderShedIntent(
+  world: PlayWorldSimulation,
+  defenderId: string | null,
+): PlayWorldSimulation {
+  if (!defenderId) return world
+  return {
+    ...world,
+    players: world.players.map((p) =>
+      p.id === defenderId && p.unit === 'defense'
+        ? { ...p, shedBoostTimer: PLAY_FEEL.action.shedBoostSeconds }
+        : p,
     ),
   }
 }
