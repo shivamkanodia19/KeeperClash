@@ -26,6 +26,8 @@ import type { PlayWorldSimulation } from '../playSim/playSimTypes'
 import {
   applyCarrierDive,
   applyCarrierJuke,
+  applyDefenderShedIntent,
+  applyDefenderTackleIntent,
   createPlayWorldFromSnap,
   setWorldPrimaryTarget,
   stepPlayWorld,
@@ -851,8 +853,20 @@ export function moveBallCarrier(core: PlayAnimationCore): PlayAnimationCore | nu
 }
 
 export function juke(core: PlayAnimationCore): PlayAnimationCore | null {
-  if (core.phase !== 'playInProgress') return null
+  if (core.phase !== 'snap' && core.phase !== 'playInProgress') return null
   if (core.world) {
+    const active = core.world.players.find((p) => p.id === core.activePlayerId)
+    if (active?.unit === 'defense') {
+      const world = applyDefenderShedIntent(core.world, active.id)
+      const synced = syncWorldToField(world)
+      return {
+        ...core,
+        world,
+        players: synced.players,
+        ball: synced.ball,
+        animatedYards: synced.animatedYards,
+      }
+    }
     const w = applyCarrierJuke(core.world, 1)
     const { players, ball } = syncWorldToField(w)
     return {
@@ -876,21 +890,7 @@ export function dive(core: PlayAnimationCore): PlayAnimationCore | null {
     const active = world.players.find((p) => p.id === core.activePlayerId)
     const w =
       active?.unit === 'defense'
-        ? {
-            ...world,
-            players: world.players.map((p) => {
-              if (p.id !== active.id) return p
-              const dx = world.ball.x - p.x
-              const dy = world.ball.y - p.y
-              const len = Math.hypot(dx, dy) || 1
-              return {
-                ...p,
-                vx: p.vx + (dx / len) * 2.4,
-                vy: p.vy + (dy / len) * 2.4,
-                phase: 'tackleAttempt' as const,
-              }
-            }),
-          }
+        ? applyDefenderTackleIntent(world, active.id)
         : applyCarrierDive(world)
     const { players, ball } = syncWorldToField(w)
     return {

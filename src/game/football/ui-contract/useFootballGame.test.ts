@@ -37,4 +37,29 @@ describe('useFootballGame live result commit', () => {
     const resultCore = advanceResult(committed!.resultCore, committed!.applied)
     expect(resultCore?.phase).toBe('result')
   })
+
+  it('commitLivePlayResult uses the live controlled tackle spot', () => {
+    const engine = {
+      ...createTestScrimmageState(),
+      possession: 'away' as const,
+      userControlledTeam: 'home' as const,
+    }
+    const core0 = createPlayAnimationCore(engine)
+    const s0 = snap(core0, engine, 'inside_zone', 'cover_2_zone')
+    expect(s0).not.toBeNull()
+    const tackledAt = s0!.core.yardLineAtSnap + 1
+    const core = {
+      ...s0!.core,
+      phase: 'tackleOrScore' as const,
+      ball: {
+        ...s0!.core.ball,
+        mode: 'dead' as const,
+        x: tackledAt,
+      },
+    }
+
+    const committed = commitLivePlayResult(engine, core)
+    expect(committed).not.toBeNull()
+    expect(committed!.resultCore.pendingResolution?.yardsGained).toBe(1)
+  })
 })
