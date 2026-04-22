@@ -712,7 +712,11 @@ function Field({
     (animation.defensiveControlEnabled || animation.controlMode === 'defense_preview')
 
   return (
-    <div className="gb-field-frame" ref={fieldRef}>
+    <div
+      className={`gb-field-frame gb-field-frame--${cam.focusMode}`}
+      ref={fieldRef}
+      style={{ '--gb-camera-zoom': cam.zoom } as CSSProperties}
+    >
       <div className="gb-crowd" />
       <div className="gb-field" aria-label="Football field">
         {yardTicks.map((tick) => {
@@ -724,7 +728,9 @@ function Field({
               className={`gb-yard-line ${tick % 10 === 0 ? 'is-major' : ''}`}
               style={{ left: `${left}%` }}
             >
-              {tick % 10 === 0 && tick !== 0 && tick !== 100 ? (
+              {(tick % 10 === 0 || cam.focusMode !== 'ball_follow') &&
+              tick !== 0 &&
+              tick !== 100 ? (
                 <>
                   <span className="top">{label}</span>
                   <span className="bottom">{label}</span>
