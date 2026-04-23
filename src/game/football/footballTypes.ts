@@ -91,6 +91,8 @@ export type PlayResolution = {
   commentary: string
   /** Set when outcome is `punt`: distance toward opponent goal from previous LOS. */
   puntNetYards?: number
+  /** Set on live turnovers: spot from the snapping offense's field perspective. */
+  turnoverYardLine?: number
 }
 
 export type GameSessionPhase =

@@ -80,6 +80,17 @@ function roleLabel(p: PlayerFieldPosition): string {
   return key.slice(0, 2)
 }
 
+function playerHudLabel(
+  players: readonly PlayerFieldPosition[],
+  playerId: string | null | undefined,
+): string {
+  if (!playerId) return 'none'
+  const player = players.find((p) => p.id === playerId)
+  if (!player) return playerId
+  const slot = player.id.slice(player.id.lastIndexOf('_') + 1).toUpperCase()
+  return `${roleLabel(player)} ${slot}`
+}
+
 function playerMotionClass(p: PlayerFieldPosition, phase: PlayAnimationSnapshot['phase']) {
   if (phase === 'tackleOrScore' && p.simPhase === 'tackled') return 'is-tackled'
   if (p.simPhase === 'blockEngaged') return 'is-blocking'
@@ -699,10 +710,12 @@ function Field({
 
   const receiverIds = useMemo(
     () =>
-      animation.players
-        .filter((p) => p.unit === 'offense' && /wr|slot|te/i.test(p.id))
-        .map((p) => p.id),
-    [animation.players],
+      animation.controllablePlayerIds.filter((id) => {
+        if (id === animation.ball.carrierId) return false
+        const player = animation.players.find((p) => p.id === id)
+        return player?.unit === 'offense'
+      }),
+    [animation.ball.carrierId, animation.controllablePlayerIds, animation.players],
   )
 
   const canChooseReceiver =
@@ -952,6 +965,8 @@ function PlayerToken({
 }) {
   const hasBall = animation.ball.carrierId === player.id
   const isActive = animation.activePlayerId === player.id
+  const isPassTarget = animation.ball.throwTargetId === player.id
+  const isSelectedDefender = animation.selectedDefenderId === player.id
   const side = player.teamId
   const role = roleLabel(player)
   const motion = playerMotionClass(player, animation.phase)
@@ -961,7 +976,7 @@ function PlayerToken({
   return (
     <button
       type="button"
-      className={`gb-player ${side} ${motion} ${facingClass(player)} ${hasBall ? 'has-ball' : ''} ${isActive ? 'is-active' : ''} ${targetClass}`}
+      className={`gb-player ${side} ${motion} ${facingClass(player)} ${hasBall ? 'has-ball' : ''} ${isActive ? 'is-active' : ''} ${isPassTarget ? 'is-pass-target' : ''} ${isSelectedDefender ? 'is-selected-defender' : ''} ${targetClass}`}
       style={{
         left: `${xPct(player.x)}%`,
         top: `${yPct(player.y)}%`,
@@ -996,13 +1011,14 @@ function BallToken({
 }) {
   const carried = Boolean(animation.ball.carrierId)
   if (carried && animation.ball.mode !== 'thrown') return null
+  const visualZoom = Math.min(1.18, Math.max(0.88, animation.cameraRecommendation.zoom))
   return (
     <span
       className="gb-ball"
       style={{
         left: `${xPct(animation.ball.x)}%`,
         top: `${yPct(animation.ball.y)}%`,
-        transform: `translate(-50%, -50%) translateY(${-(animation.ball.z ?? 0) * 8}px) rotate(-12deg)`,
+        transform: `translate(-50%, -50%) translateY(${-(animation.ball.z ?? 0) * 8}px) rotate(-12deg) scale(${visualZoom})`,
       }}
     />
   )
@@ -1045,6 +1061,12 @@ function ControlDeck({
   const live =
     animation.phase === 'snap' || animation.phase === 'playInProgress'
   const canAdvance = animation.legal.canAdvanceResult
+  const activePlayerLabel = playerHudLabel(animation.players, animation.activePlayerId)
+  const targetPlayerLabel = playerHudLabel(animation.players, animation.ball.throwTargetId)
+  const defenderPlayerLabel = playerHudLabel(
+    animation.players,
+    animation.selectedDefenderId ?? animation.activePlayerId,
+  )
 
   if (live && userOnOffense) {
     return (
@@ -1053,7 +1075,10 @@ function ControlDeck({
         <div className="gb-live-hint">
           <strong>{animation.legal.canSelectReceiver ? 'Target, move, throw' : 'Run the lane'}</strong>
           <span>WASD moves. R switches. J jukes. Space dives.</span>
-          <small>Active: {animation.activePlayerId ?? 'none'}</small>
+          <small>
+            Active: {activePlayerLabel}
+            {animation.legal.canSelectReceiver ? ` | Target: ${targetPlayerLabel}` : ''}
+          </small>
         </div>
         <div className="gb-action-cluster">
           <button type="button" onClick={onReceiver} disabled={!animation.legal.canSelectReceiver}>
@@ -1078,7 +1103,10 @@ function ControlDeck({
           <div className="gb-live-hint">
             <strong>Control the defender</strong>
             <span>WASD moves. R switches. Space closes for tackle.</span>
-            <small>Active: {animation.selectedDefenderId ?? animation.activePlayerId ?? 'none'}</small>
+            <small>
+              Defender: {defenderPlayerLabel} | Call:{' '}
+              {animation.selectedDefensiveCallId ?? selectedDefensiveCallId ?? 'defense'}
+            </small>
           </div>
           <div className="gb-action-cluster">
             <button type="button" onClick={onReceiver}>

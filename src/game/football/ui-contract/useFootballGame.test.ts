@@ -62,4 +62,34 @@ describe('useFootballGame live result commit', () => {
     expect(committed).not.toBeNull()
     expect(committed!.resultCore.pendingResolution?.yardsGained).toBe(1)
   })
+
+  it('commitLivePlayResult preserves the visible interception spot', () => {
+    const engine = createTestScrimmageState()
+    const core0 = createPlayAnimationCore(engine)
+    const s0 = snap(core0, engine, 'quick_slants', 'cover_2_zone')
+    expect(s0).not.toBeNull()
+    const defender = s0!.core.players.find((p) => p.unit === 'defense')
+    expect(defender).toBeDefined()
+    const turnoverX = 42
+    const core = {
+      ...s0!.core,
+      phase: 'tackleOrScore' as const,
+      ball: {
+        ...s0!.core.ball,
+        mode: 'carried' as const,
+        carrierId: defender!.id,
+        x: turnoverX,
+      },
+      players: s0!.core.players.map((p) =>
+        p.id === defender!.id ? { ...p, x: turnoverX, unit: 'defense' as const } : p,
+      ),
+    }
+
+    const committed = commitLivePlayResult(engine, core)
+    expect(committed).not.toBeNull()
+    expect(committed!.resultCore.pendingResolution?.outcome).toBe('interception')
+    expect(committed!.resultCore.pendingResolution?.turnoverYardLine).toBe(turnoverX)
+    expect(committed!.applied.possession).toBe('away')
+    expect(committed!.applied.yardLine).toBe(100 - turnoverX)
+  })
 })

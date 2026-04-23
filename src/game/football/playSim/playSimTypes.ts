@@ -90,7 +90,13 @@ export type BallSimState = {
   catchWindowOpen: number | null
 }
 
-export type PassSimStage = 'qbCarry' | 'inFlight' | 'received' | 'incomplete' | 'intercepted'
+export type PassSimStage =
+  | 'qbCarry'
+  | 'inFlight'
+  | 'received'
+  | 'incomplete'
+  | 'intercepted'
+  | 'sacked'
 
 export type PlayWorldInput = {
   /** -1 … 1 lateral intent for ball carrier (offense user). */
@@ -118,7 +124,14 @@ export type PlayWorldSimulation = {
   /** Target receiver id for throw / catch checks */
   primaryTargetId: string | null
   finished: boolean
-  lastWhistleReason: 'tackle' | 'score' | 'incomplete' | 'interception' | 'script_limit' | null
+  lastWhistleReason:
+    | 'tackle'
+    | 'score'
+    | 'incomplete'
+    | 'interception'
+    | 'sack'
+    | 'script_limit'
+    | null
   /** Architecture: future user-controlled defender id */
   futureControllableDefenseId: string | null
 }

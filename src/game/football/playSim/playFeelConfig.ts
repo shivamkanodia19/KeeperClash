@@ -1,6 +1,7 @@
 export const PLAY_FEEL = {
   playbackTimeScale: 0.34,
   substepDt: 1 / 60,
+  manualStepSubsteps: 10,
   maxFrameDtSeconds: 0.25,
   readableRunMinSeconds: 3.2,
   readableRunMaxSeconds: 7.5,

@@ -442,6 +442,8 @@ button {
 }
 
 .gb-field-frame {
+  --gb-camera-zoom: 1;
+  --gb-visual-zoom: clamp(0.88, var(--gb-camera-zoom), 1.18);
   position: relative;
   overflow: hidden;
   min-height: 0;
@@ -622,7 +624,8 @@ button {
   width: 42px;
   height: 52px;
   padding: 0;
-  transform: translate(-50%, -80%);
+  transform: translate(-50%, -80%) scale(var(--gb-visual-zoom));
+  transform-origin: 50% 80%;
   border: 0;
   background: transparent;
   color: #fff;
@@ -645,7 +648,7 @@ button {
   content: "";
   position: absolute;
   inset: -8px;
-  border: 2px dashed var(--hud-yellow);
+  border: 2px dashed rgba(255, 247, 201, 0.82);
   border-radius: 50%;
   animation: gb-blink 0.8s steps(2, end) infinite;
 }
@@ -811,6 +814,24 @@ button {
   inset: -7px -5px;
   border: 2px solid var(--hud-yellow);
   box-shadow: 0 0 8px rgba(255, 232, 67, 0.75);
+  pointer-events: none;
+}
+
+.gb-player.is-pass-target::before {
+  content: "";
+  position: absolute;
+  inset: -12px -10px;
+  border: 3px dashed var(--hud-cyan);
+  box-shadow: 0 0 10px rgba(57, 233, 255, 0.72);
+  pointer-events: none;
+}
+
+.gb-player.is-selected-defender::before {
+  content: "";
+  position: absolute;
+  inset: -12px -10px;
+  border: 3px dashed var(--hud-red);
+  box-shadow: 0 0 10px rgba(255, 61, 79, 0.7);
   pointer-events: none;
 }
 

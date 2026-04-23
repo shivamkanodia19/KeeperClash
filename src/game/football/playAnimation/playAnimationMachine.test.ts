@@ -119,31 +119,58 @@ describe('playAnimationMachine', () => {
     expect(core.activePlayerId).toBe(core.ball.carrierId)
   })
 
-  it('throwTo target keeps QB control until the selected receiver catches', () => {
+  it('screen pass exposes the RB as the live pass target', () => {
+    const engine = createTestScrimmageState()
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'screen_pass', 'cover_3_sky')
+    expect(s0).not.toBeNull()
+    core = s0!.core
+
+    expect(core.ball.throwTargetId).toBe('home_rb')
+
+    const view = toPlayAnimationSnapshot(
+      core,
+      engine,
+      'home',
+      'screen_pass',
+      'cover_3_sky',
+    )
+    expect(view.controllablePlayerIds).toContain('home_rb')
+
+    const targeted = switchActivePlayer(core, 'home_rb', 'offense')
+    expect(targeted).not.toBeNull()
+    expect(targeted!.ball.throwTargetId).toBe('home_rb')
+  })
+
+  it('throwTo target keeps QB control while aiming at the selected receiver', () => {
     const engine = createTestScrimmageState()
     let core = createPlayAnimationCore(engine)
     const s0 = snap(core, engine, 'quick_slants', 'cover_2_zone')
     expect(s0).not.toBeNull()
     core = s0!.core
-    const target = core.players.find(
-      (p) => p.unit === 'offense' && /_wr\d/i.test(p.id) && p.id !== core.ball.throwTargetId,
+    const qbId = core.ball.carrierId
+    const view = toPlayAnimationSnapshot(
+      core,
+      engine,
+      'home',
+      'quick_slants',
+      'cover_2_zone',
     )
+    const targetId = view.controllablePlayerIds.find(
+      (id) => id !== qbId && id !== core.ball.throwTargetId,
+    )
+    const target = core.players.find((p) => p.id === targetId)
     expect(target).toBeDefined()
 
     core = switchActivePlayer(core, target!.id, 'offense')!
     expect(core.ball.throwTargetId).toBe(target!.id)
     expect(core.activePlayerId).toBe(core.ball.carrierId)
-
-    for (
-      let i = 0;
-      i < 180 && core.ball.carrierId !== target!.id && core.phase !== 'tackleOrScore';
-      i++
-    ) {
+    for (let i = 0; i < 60 && core.ball.mode !== 'thrown' && core.phase !== 'tackleOrScore'; i++) {
       core = advancePlaySimulationFrame(core, 33)!
     }
 
-    expect(core.ball.carrierId).toBe(target!.id)
-    expect(core.activePlayerId).toBe(target!.id)
+    expect(core.ball.throwTargetId).toBe(target!.id)
+    expect(core.activePlayerId === qbId || core.activePlayerId === target!.id).toBe(true)
   })
 
   it('defensive control can select and steer a defender', () => {

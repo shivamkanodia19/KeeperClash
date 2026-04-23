@@ -76,7 +76,7 @@ export function commitLivePlayResult(
   const liveResolution = deriveLivePlayResolution(animCore) ?? animCore.pendingResolution
   const resolvedNext =
     liveResolution != null
-      ? applyResolvedPlay(engine, liveResolution, Math.random)
+      ? applyResolvedPlay(engine, liveResolution)
       : animCore.pendingNext
   const applied: FootballGameState = {
     ...resolvedNext,

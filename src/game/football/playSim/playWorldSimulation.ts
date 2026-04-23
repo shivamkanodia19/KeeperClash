@@ -1,5 +1,6 @@
 import type { OffensiveFormationId, PlayResolution, TeamId } from '../footballTypes'
 import { getOffensivePlay } from '../playDefinitions'
+import { passReceiverIds } from '../playAnimation/layout'
 import type { BallFieldState, PlayerFieldPosition } from '../playAnimation/types'
 import { buildOffensivePreviewLines } from '../spatial/playRouteGeometry'
 import { PLAY_FEEL } from './playFeelConfig'
@@ -31,10 +32,10 @@ export function inferRoleFromPlayerId(playerId: string, unit: 'offense' | 'defen
   if (/^rb|^fb/.test(k)) return 'RB'
   if (/^wr|^slot/.test(k)) return 'WR'
   if (/^te/.test(k)) return 'TE'
+  if (/^cb/.test(k)) return 'CB'
   if (/^ol|^c|^g|^t/.test(k)) return 'OL'
   if (/^de|^dt|^dl|^nt/.test(k)) return 'DL'
   if (/^lb|^sam|^mike|^will|^nickel/.test(k)) return 'LB'
-  if (/^cb/.test(k)) return 'CB'
   if (/^fs|^ss|^s\d/.test(k)) return 'S'
   if (/^k\b|^pk/.test(k)) return 'K'
   if (/^kr|^pr/.test(k)) return 'KR'
@@ -185,6 +186,7 @@ function layoutToSimPlayers(
       p.unit === 'offense'
         ? buildWaypointsForPlayer(los, formationId, playId, category, p.id)
         : []
+    const hasDesignedRoute = p.unit === 'offense' && routeWaypoints.length >= 2
     if (p.unit === 'offense' && routeWaypoints.length < 2) {
       const start = { x: p.x, y: p.y }
       const lat = role === 'RB' || role === 'WR' ? p.y * 0.08 : 0
@@ -199,6 +201,15 @@ function layoutToSimPlayers(
         ],
         1.5,
       )
+    }
+    let phase = initialPhaseFor(role, p.unit, category, defenseCallId)
+    if (
+      p.unit === 'offense' &&
+      category === 'pass' &&
+      hasDesignedRoute &&
+      (role === 'RB' || role === 'WR' || role === 'TE')
+    ) {
+      phase = 'routeRun'
     }
     return {
       id: p.id,
@@ -222,7 +233,7 @@ function layoutToSimPlayers(
       actionCooldown: 0,
       tackleIntentTimer: 0,
       shedBoostTimer: 0,
-      phase: initialPhaseFor(role, p.unit, category, defenseCallId),
+      phase,
       routeWaypoints,
       routeIndex: 0,
       engagedWith: null,
@@ -338,9 +349,10 @@ export function createPlayWorldFromSnap(p: CreatePlayWorldParams): PlayWorldSimu
     if (qbP) qbP.phase = 'snapReact'
   }
 
-  const receiverOrder = players
-    .filter((x) => x.unit === 'offense' && (x.role === 'WR' || x.role === 'TE'))
-    .map((x) => x.id)
+  const playerIds = new Set(players.map((x) => x.id))
+  const receiverOrder = passReceiverIds(p.offenseTeam, formationId, p.offensePlayId).filter((id) =>
+    playerIds.has(id),
+  )
   const primaryTargetId = receiverOrder[0] ?? null
 
   const ball: BallSimState = {
@@ -386,6 +398,86 @@ function rotateToward(current: number, target: number, maxTurn: number): number 
   while (d < -Math.PI) d += Math.PI * 2
   if (Math.abs(d) <= maxTurn) return target
   return current + Math.sign(d) * maxTurn
+}
+
+function lateralSign(p: SimPlayer): number {
+  return p.y >= 0 ? 1 : -1
+}
+
+function zoneAnchorForAssignment(
+  p: SimPlayer,
+  world: PlayWorldSimulation,
+): { x: number; y: number; maxMul: number } | null {
+  const los = world.yardLineAtSnap
+  const side = lateralSign(p)
+  const slot = slotKeyFromId(p.id)
+
+  if (p.assignment === 'deep_r' || p.assignment === 'deep_l' || p.assignment === 'deep_half') {
+    return {
+      x: clamp(los + 17, PLAY_FEEL.player.minFieldX, PLAY_FEEL.player.maxFieldX),
+      y: p.assignment === 'deep_l' ? -18 : p.assignment === 'deep_r' ? 18 : side * 18,
+      maxMul: 0.82,
+    }
+  }
+
+  if (p.assignment === 'deep_third') {
+    const y = /cb1|lcb|left/i.test(slot) ? -19 : /cb2|rcb|right/i.test(slot) ? 19 : 0
+    return {
+      x: clamp(los + 15, PLAY_FEEL.player.minFieldX, PLAY_FEEL.player.maxFieldX),
+      y,
+      maxMul: 0.86,
+    }
+  }
+
+  if (p.assignment === 'post_safety') {
+    return {
+      x: clamp(los + 18, PLAY_FEEL.player.minFieldX, PLAY_FEEL.player.maxFieldX),
+      y: 0,
+      maxMul: 0.86,
+    }
+  }
+
+  if (p.assignment === 'flat_cloud') {
+    return {
+      x: clamp(los + 4.5, PLAY_FEEL.player.minFieldX, PLAY_FEEL.player.maxFieldX),
+      y: side * 21,
+      maxMul: 0.9,
+    }
+  }
+
+  if (p.assignment === 'hook_zone') {
+    return {
+      x: clamp(los + 5.5, PLAY_FEEL.player.minFieldX, PLAY_FEEL.player.maxFieldX),
+      y: clamp(p.y * 0.45, -9, 9),
+      maxMul: 0.86,
+    }
+  }
+
+  if (p.assignment === 'hook_flat') {
+    return {
+      x: clamp(los + 6.5, PLAY_FEEL.player.minFieldX, PLAY_FEEL.player.maxFieldX),
+      y: clamp(p.y + side * 4, -18, 18),
+      maxMul: 0.88,
+    }
+  }
+
+  if (p.assignment === 'seam_help' || p.assignment === 'curl' || p.assignment === 'zone_drop') {
+    return {
+      x: clamp(los + 4.5, PLAY_FEEL.player.minFieldX, PLAY_FEEL.player.maxFieldX),
+      y: clamp(p.y * 0.7, -13, 13),
+      maxMul: 0.82,
+    }
+  }
+
+  if (p.assignment === 'contain') {
+    return {
+      x: clamp(los + 1.5, PLAY_FEEL.player.minFieldX, PLAY_FEEL.player.maxFieldX),
+      y: clamp(p.y, -22, 22),
+      maxMul: 0.84,
+    }
+  }
+
+  return null
 }
 
 function computeDesiredMotion(
@@ -516,6 +608,18 @@ function computeDesiredMotion(
       const dy = tgt.y - p.y
       const len = Math.hypot(dx, dy) || 1
       return { dx: dx / len, dy: dy / len, maxMul: 1.08 }
+    }
+    const shouldHoldCoverage =
+      playCategory === 'pass' &&
+      world.passStage !== 'received' &&
+      world.passStage !== 'intercepted' &&
+      world.passStage !== 'sacked'
+    const zoneAnchor = shouldHoldCoverage ? zoneAnchorForAssignment(p, world) : null
+    if (zoneAnchor) {
+      const dx = zoneAnchor.x - p.x
+      const dy = zoneAnchor.y - p.y
+      const len = Math.hypot(dx, dy) || 1
+      return { dx: dx / len, dy: dy / len, maxMul: zoneAnchor.maxMul }
     }
     const lead = 0.4
     const ix = carrier.x + carrier.vx * lead
@@ -758,22 +862,68 @@ function passStep(
         }
       }
 
-      if (outcome === 'incomplete' || outcome === 'sack') {
+      if (outcome === 'sack') {
+        w.passStage = 'sacked'
+        w.ball.mode = 'dead'
+        w.ball.carrierId = null
+        if (qb) {
+          w.ball.x = qb.x
+          w.ball.y = qb.y
+          w.players = w.players.map((p) =>
+            p.id === qb.id ? { ...p, phase: 'tackled' as PlayerSimPhase } : p,
+          )
+        }
+        w.lastWhistleReason = 'sack'
+        w.finished = true
+        return w
+      }
+      if (outcome === 'incomplete') {
         w.passStage = 'incomplete'
         w.ball.mode = 'dead'
         w.lastWhistleReason = 'incomplete'
         w.finished = true
         return w
       }
-      if (outcome === 'interception' && nearestDef && nd < PLAY_FEEL.pass.interceptRadius + 0.7) {
+      if (outcome === 'interception' && nearestDef) {
         w.passStage = 'intercepted'
         w.ball.carrierId = nearestDef.id
         w.ball.mode = 'carried'
-        nearestDef.phase = 'carryBall'
+        w.ball.x = nearestDef.x
+        w.ball.y = nearestDef.y
         w.players = w.players.map((p) =>
           p.id === nearestDef!.id ? { ...p, phase: 'carryBall' as PlayerSimPhase } : p,
         )
         w.lastWhistleReason = 'interception'
+        return w
+      }
+      const receiverScore = (tgt?.awareness ?? 0.6) + (tgt?.agility ?? 0.5) * 0.2
+      const defenderScore =
+        nearestDef != null ? nearestDef.awareness + nearestDef.agility * 0.15 : 0
+      if (
+        nearestDef &&
+        nd < PLAY_FEEL.pass.interceptRadius &&
+        defenderScore > receiverScore + 0.08
+      ) {
+        w.passStage = 'intercepted'
+        w.ball.carrierId = nearestDef.id
+        w.ball.mode = 'carried'
+        w.ball.x = nearestDef.x
+        w.ball.y = nearestDef.y
+        w.players = w.players.map((p) =>
+          p.id === nearestDef!.id ? { ...p, phase: 'carryBall' as PlayerSimPhase } : p,
+        )
+        w.lastWhistleReason = 'interception'
+        return w
+      }
+      if (
+        nearestDef &&
+        nd < PLAY_FEEL.pass.swatRadius &&
+        defenderScore > receiverScore + 0.18
+      ) {
+        w.passStage = 'incomplete'
+        w.ball.mode = 'dead'
+        w.lastWhistleReason = 'incomplete'
+        w.finished = true
         return w
       }
       if (distTgt < CATCH_RADIUS + 0.45 && tgt) {
@@ -788,7 +938,7 @@ function passStep(
       } else {
         /** contested: use awareness vs nearest defender */
         const defPressure = nearestDef && nd < 1.8 ? nearestDef.awareness : 0
-        const catchScore = (tgt?.awareness ?? 0.6) + (tgt?.agility ?? 0.5) * 0.2 - defPressure
+        const catchScore = receiverScore - defPressure
         if (catchScore > 0.45 && tgt) {
           w.passStage = 'received'
           w.ball.carrierId = tgt.id

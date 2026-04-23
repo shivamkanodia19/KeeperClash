@@ -84,6 +84,77 @@ describe('playWorldSimulation', () => {
     expect(Math.abs(animatedYards - (b.x - los))).toBeLessThan(0.001)
   })
 
+  it('screen pass uses the running back as a designed receiver', () => {
+    const engine = createTestScrimmageState()
+    const off = getOffensivePlay('screen_pass')!
+    const def = getDefensiveCall('cover_3_sky')!
+    const { players, ball } = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      def.visualTemplateId,
+    )
+
+    const world = createPlayWorldFromSnap({
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: 7,
+      offensePlayId: 'screen_pass',
+      defenseCallId: 'cover_3_sky',
+      layoutPlayers: players,
+      ball,
+      resolution: {
+        outcome: 'normal',
+        yardsGained: 7,
+        clockUsed: 0,
+        commentary: 'Screen',
+      },
+    })
+
+    expect(world.primaryTargetId).toBe('home_rb')
+    expect(world.ball.throwTargetId).toBe('home_rb')
+    expect(world.players.find((p) => p.id === 'home_rb')?.phase).toBe('routeRun')
+  })
+
+  it('zone calls move defenders toward their shell responsibilities', () => {
+    const engine = createTestScrimmageState()
+    const off = getOffensivePlay('quick_slants')!
+    const def = getDefensiveCall('cover_2_zone')!
+    const { players, ball } = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      def.visualTemplateId,
+    )
+    const resolution = {
+      outcome: 'normal' as const,
+      yardsGained: 7,
+      clockUsed: 0,
+      commentary: 'Completion',
+    }
+    let world = createPlayWorldFromSnap({
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: 7,
+      offensePlayId: 'quick_slants',
+      defenseCallId: 'cover_2_zone',
+      layoutPlayers: players,
+      ball,
+      resolution,
+    })
+    const corner = world.players.find((p) => p.unit === 'defense' && p.assignment === 'flat_cloud')
+    expect(corner).toBeDefined()
+    const startWidth = Math.abs(corner!.y)
+
+    for (let i = 0; i < 24; i++) {
+      world = stepPlayWorld(world, SUBSTEP_DT, { carrierSteer: 0 }, resolution)
+    }
+
+    const movedCorner = world.players.find((p) => p.id === corner!.id)
+    expect(movedCorner).toBeDefined()
+    expect(Math.abs(movedCorner!.y)).toBeGreaterThan(startWidth)
+  })
+
   it('live tuning keeps players readable over one second', () => {
     const engine = createTestScrimmageState()
     const rng = createSeededRng(15)
@@ -430,5 +501,122 @@ describe('playWorldSimulation', () => {
 
     expect(world.ball.carrierId).toBe(targets[1]!.id)
     expect(world.passStage).toBe('received')
+  })
+
+  it('nearby defender can win a live pass at the catch point', () => {
+    const engine = createTestScrimmageState()
+    const rng = createSeededRng(32)
+    const { resolution, committedPlayIds } = advanceDrive(
+      engine,
+      { userOffensePlayId: 'quick_slants' },
+      rng,
+    )
+    const off = getOffensivePlay('quick_slants')!
+    const def = getDefensiveCall(committedPlayIds.defenseCallId)
+    const setup = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      def?.visualTemplateId ?? 'four_three_base',
+    )
+    const world = createPlayWorldFromSnap({
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: 7,
+      offensePlayId: 'quick_slants',
+      defenseCallId: 'cover_2_zone',
+      layoutPlayers: setup.players,
+      ball: setup.ball,
+      resolution: { ...resolution, outcome: 'normal', yardsGained: 7 },
+    })
+    const target = world.players.find(
+      (p) => p.unit === 'offense' && (p.role === 'WR' || p.role === 'TE'),
+    )!
+    const defender = world.players.find((p) => p.unit === 'defense')!
+    expect(defender).toBeDefined()
+    const contested = {
+      ...world,
+      passStage: 'inFlight' as const,
+      primaryTargetId: target.id,
+      ball: {
+        ...world.ball,
+        mode: 'thrown' as const,
+        carrierId: null,
+        throwTargetId: target.id,
+        x: target.x,
+        y: target.y,
+        z: 0.01,
+        vx: 0,
+        vy: 0,
+        vz: -1,
+      },
+      players: world.players.map((p) =>
+        p.id === defender.id
+          ? { ...p, x: target.x + 0.1, y: target.y, awareness: 1, agility: 1 }
+          : p,
+      ),
+    }
+
+    const next = stepPlayWorld(contested, SUBSTEP_DT, { carrierSteer: 0 }, {
+      ...resolution,
+      outcome: 'normal',
+      yardsGained: 7,
+    })
+
+    expect(next.passStage).toBe('intercepted')
+    expect(next.ball.carrierId).toBe(defender.id)
+    expect(next.lastWhistleReason).toBe('interception')
+  })
+
+  it('scripted sacks use a sack-specific live branch', () => {
+    const engine = createTestScrimmageState()
+    const rng = createSeededRng(33)
+    const { resolution, committedPlayIds } = advanceDrive(
+      engine,
+      { userOffensePlayId: 'quick_slants' },
+      rng,
+    )
+    const off = getOffensivePlay('quick_slants')!
+    const def = getDefensiveCall(committedPlayIds.defenseCallId)
+    const setup = layoutPlayersAtLos(
+      engine.possession,
+      engine.yardLine,
+      off.formationId,
+      def?.visualTemplateId ?? 'four_three_base',
+    )
+    const world = createPlayWorldFromSnap({
+      offenseTeam: engine.possession,
+      yardLineAtSnap: engine.yardLine,
+      signedTargetYards: -5,
+      offensePlayId: 'quick_slants',
+      defenseCallId: 'cover_0_blitz',
+      layoutPlayers: setup.players,
+      ball: setup.ball,
+      resolution: { ...resolution, outcome: 'sack', yardsGained: -5 },
+    })
+    const contested = {
+      ...world,
+      passStage: 'inFlight' as const,
+      ball: {
+        ...world.ball,
+        mode: 'thrown' as const,
+        carrierId: null,
+        z: 0.01,
+        vx: 0,
+        vy: 0,
+        vz: -1,
+      },
+    }
+
+    const next = stepPlayWorld(contested, SUBSTEP_DT, { carrierSteer: 0 }, {
+      ...resolution,
+      outcome: 'sack',
+      yardsGained: -5,
+    })
+
+    expect(next.finished).toBe(true)
+    expect(next.passStage).toBe('sacked')
+    expect(next.lastWhistleReason).toBe('sack')
+    expect(next.ball.carrierId).toBeNull()
   })
 })

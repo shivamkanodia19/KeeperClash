@@ -285,7 +285,6 @@ export type AdvanceParams = {
 export function applyResolvedPlay(
   state: FootballGameState,
   resolution: PlayResolution,
-  rng: () => number,
 ): FootballGameState {
   if (state.gameOver) {
     throw new Error('Cannot apply play to a finished game.')
@@ -354,9 +353,10 @@ export function applyResolvedPlay(
     }
     case 'interception':
     case 'fumble_lost': {
-      const returnYard = Math.round(25 + rng() * 30)
+      const turnoverSpot =
+        resolution.turnoverYardLine ?? clampLine(state.yardLine + resolution.yardsGained)
       next.possession = other(offenseTeam)
-      next.yardLine = clampLine(returnYard)
+      next.yardLine = mirrorField(turnoverSpot)
       next.down = 1
       next.yardsToGo = yardsToGoAfterFirstDown(next.yardLine)
       break
@@ -474,7 +474,7 @@ export function advanceDrive(
     rng,
   )
 
-  const next = applyResolvedPlay(state, resolution, rng)
+  const next = applyResolvedPlay(state, resolution)
   return {
     next,
     resolution,
