@@ -26,17 +26,20 @@ import type { PlayWorldSimulation } from '../playSim/playSimTypes'
 import {
   applyCarrierDive,
   applyCarrierJuke,
+  applyDefenderShedIntent,
+  applyDefenderTackleIntent,
   createPlayWorldFromSnap,
   setWorldPrimaryTarget,
   stepPlayWorld,
   SUBSTEP_DT,
   syncWorldToField,
 } from '../playSim/playWorldSimulation'
+import { PLAY_FEEL } from '../playSim/playFeelConfig'
 
 const YARD_ANIM_STEP = 0.34
-const PLAYBACK_TIME_SCALE = 0.42
+const PLAYBACK_TIME_SCALE = PLAY_FEEL.playbackTimeScale
 /** Physics substeps bundled into one `moveBallCarrier` UI tick. */
-const SIM_SUBSTEPS_PER_MOVE = 10
+const SIM_SUBSTEPS_PER_MOVE = PLAY_FEEL.manualStepSubsteps
 
 export type PlayAnimationCore = {
   phase: PlayAnimationPhase
@@ -252,7 +255,7 @@ function offensiveControlCandidates(core: PlayAnimationCore): readonly string[] 
   if (core.ball.carrierId) ids.push(core.ball.carrierId)
   const play = getOffensivePlay(core.committedOffensePlayId ?? '')
   if (play?.category === 'pass') {
-    for (const id of passReceiverIds(core.offenseTeamAtSnap, play.formationId)) {
+    for (const id of passReceiverIds(core.offenseTeamAtSnap, play.formationId, play.id)) {
       if (!ids.includes(id)) ids.push(id)
     }
   }
@@ -262,7 +265,7 @@ function offensiveControlCandidates(core: PlayAnimationCore): readonly string[] 
 function passReceiverCandidates(core: PlayAnimationCore): readonly string[] {
   const play = getOffensivePlay(core.committedOffensePlayId ?? '')
   if (!play || play.category !== 'pass') return []
-  return [...passReceiverIds(core.offenseTeamAtSnap, play.formationId)]
+  return [...passReceiverIds(core.offenseTeamAtSnap, play.formationId, play.id)]
 }
 
 function currentPassTargetId(core: PlayAnimationCore, receivers: readonly string[]): string | null {
@@ -496,18 +499,24 @@ export function snap(
     ball: ballAtSnap,
     resolution,
   })
+  const ballWithLiveTarget: BallFieldState = {
+    ...ballAtSnap,
+    mode: world.ball.mode,
+    throwTargetId: world.ball.throwTargetId,
+    z: world.ball.z,
+  }
 
   return {
     core: {
       ...core,
       phase: 'snap',
       players,
-      ball: ballAtSnap,
+      ball: ballWithLiveTarget,
       world,
       carrierSteerInput: 0,
       moveInputX: 0,
       moveInputY: 0,
-      activePlayerId: ballAtSnap.carrierId,
+      activePlayerId: ballWithLiveTarget.carrierId,
       pendingNext: next,
       pendingResolution: resolution,
       committedOffensePlayId,
@@ -656,10 +665,12 @@ export function deriveLivePlayResolution(core: PlayAnimationCore): PlayResolutio
     ? core.players.find((p) => p.id === core.ball.carrierId)
     : null
   if (carrier?.unit === 'defense') {
+    const turnoverYardLine = Math.round(core.ball.x)
     return {
       ...base,
       outcome: 'interception',
       yardsGained: Math.round(core.ball.x - core.yardLineAtSnap),
+      turnoverYardLine,
       commentary: dynamicCommentary(base, 0, 'interception'),
     }
   }
@@ -708,7 +719,10 @@ export function advancePlaySimulationFrame(
 
   let w = core.world
   const res = core.pendingResolution
-  const dtSec = Math.min(0.16, (Math.max(0, dtMs) / 1000) * PLAYBACK_TIME_SCALE)
+  const dtSec = Math.min(
+    PLAY_FEEL.maxFrameDtSeconds,
+    (Math.max(0, dtMs) / 1000) * PLAYBACK_TIME_SCALE,
+  )
   let remaining = dtSec
   while (remaining > 1e-6) {
     const step = Math.min(SUBSTEP_DT, remaining)
@@ -851,8 +865,20 @@ export function moveBallCarrier(core: PlayAnimationCore): PlayAnimationCore | nu
 }
 
 export function juke(core: PlayAnimationCore): PlayAnimationCore | null {
-  if (core.phase !== 'playInProgress') return null
+  if (core.phase !== 'snap' && core.phase !== 'playInProgress') return null
   if (core.world) {
+    const active = core.world.players.find((p) => p.id === core.activePlayerId)
+    if (active?.unit === 'defense') {
+      const world = applyDefenderShedIntent(core.world, active.id)
+      const synced = syncWorldToField(world)
+      return {
+        ...core,
+        world,
+        players: synced.players,
+        ball: synced.ball,
+        animatedYards: synced.animatedYards,
+      }
+    }
     const w = applyCarrierJuke(core.world, 1)
     const { players, ball } = syncWorldToField(w)
     return {
@@ -876,21 +902,7 @@ export function dive(core: PlayAnimationCore): PlayAnimationCore | null {
     const active = world.players.find((p) => p.id === core.activePlayerId)
     const w =
       active?.unit === 'defense'
-        ? {
-            ...world,
-            players: world.players.map((p) => {
-              if (p.id !== active.id) return p
-              const dx = world.ball.x - p.x
-              const dy = world.ball.y - p.y
-              const len = Math.hypot(dx, dy) || 1
-              return {
-                ...p,
-                vx: p.vx + (dx / len) * 2.4,
-                vy: p.vy + (dy / len) * 2.4,
-                phase: 'tackleAttempt' as const,
-              }
-            }),
-          }
+        ? applyDefenderTackleIntent(world, active.id)
         : applyCarrierDive(world)
     const { players, ball } = syncWorldToField(w)
     return {

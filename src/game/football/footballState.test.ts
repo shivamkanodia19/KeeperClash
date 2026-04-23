@@ -12,11 +12,12 @@ describe('applyResolvedPlay scrimmage', () => {
   const base = createTestScrimmageState()
 
   it('1st and 10, gain 4 -> 2nd and 6', () => {
-    const next = applyResolvedPlay(
-      base,
-      { outcome: 'normal', yardsGained: 4, clockUsed: 10, commentary: 'Gain 4' },
-      () => 0.5,
-    )
+    const next = applyResolvedPlay(base, {
+      outcome: 'normal',
+      yardsGained: 4,
+      clockUsed: 10,
+      commentary: 'Gain 4',
+    })
     expect(next.possession).toBe('home')
     expect(next.yardLine).toBe(29)
     expect(next.down).toBe(2)
@@ -27,11 +28,12 @@ describe('applyResolvedPlay scrimmage', () => {
 
   it('2nd and 6 at 29, gain 7 -> 1st and 10', () => {
     const s: FootballGameState = { ...base, yardLine: 29, down: 2 as Down, yardsToGo: 6 }
-    const next = applyResolvedPlay(
-      s,
-      { outcome: 'normal', yardsGained: 7, clockUsed: 10, commentary: 'Gain 7' },
-      () => 0.5,
-    )
+    const next = applyResolvedPlay(s, {
+      outcome: 'normal',
+      yardsGained: 7,
+      clockUsed: 10,
+      commentary: 'Gain 7',
+    })
     expect(next.down).toBe(1)
     expect(next.yardLine).toBe(36)
     expect(next.yardsToGo).toBe(10)
@@ -39,11 +41,12 @@ describe('applyResolvedPlay scrimmage', () => {
 
   it('4th down incomplete -> turnover on downs, possession flips', () => {
     const s: FootballGameState = { ...base, down: 4 as Down, yardsToGo: 8, yardLine: 40 }
-    const next = applyResolvedPlay(
-      s,
-      { outcome: 'incomplete', yardsGained: 0, clockUsed: 5, commentary: 'Incomplete' },
-      () => 0.5,
-    )
+    const next = applyResolvedPlay(s, {
+      outcome: 'incomplete',
+      yardsGained: 0,
+      clockUsed: 5,
+      commentary: 'Incomplete',
+    })
     expect(next.possession).toBe('away')
     expect(next.down).toBe(1)
     expect(next.yardLine).toBe(60)
@@ -55,11 +58,12 @@ describe('applyResolvedPlay scoring & special teams', () => {
 
   it('yard line crossing 100 as touchdown: +7 and kickoff to defense', () => {
     const s: FootballGameState = { ...base, yardLine: 95, down: 1, yardsToGo: 10 }
-    const next = applyResolvedPlay(
-      s,
-      { outcome: 'touchdown', yardsGained: 5, clockUsed: 12, commentary: 'TD' },
-      () => 0.5,
-    )
+    const next = applyResolvedPlay(s, {
+      outcome: 'touchdown',
+      yardsGained: 5,
+      clockUsed: 12,
+      commentary: 'TD',
+    })
     expect(next.homeScore).toBe(7)
     expect(next.possession).toBe('away')
     expect(next.yardLine).toBe(25)
@@ -75,21 +79,23 @@ describe('applyResolvedPlay scoring & special teams', () => {
       down: 1,
       yardsToGo: 5,
     }
-    const next = applyResolvedPlay(
-      s,
-      { outcome: 'touchdown', yardsGained: 5, clockUsed: 12, commentary: 'TD' },
-      () => 0.5,
-    )
+    const next = applyResolvedPlay(s, {
+      outcome: 'touchdown',
+      yardsGained: 5,
+      clockUsed: 12,
+      commentary: 'TD',
+    })
     expect(next.awayScore).toBe(7)
     expect(next.possession).toBe('home')
   })
 
   it('field goal made -> +3 and possession flips', () => {
-    const next = applyResolvedPlay(
-      base,
-      { outcome: 'field_goal_made', yardsGained: 0, clockUsed: 8, commentary: 'FG good' },
-      () => 0.5,
-    )
+    const next = applyResolvedPlay(base, {
+      outcome: 'field_goal_made',
+      yardsGained: 0,
+      clockUsed: 8,
+      commentary: 'FG good',
+    })
     expect(next.homeScore).toBe(3)
     expect(next.possession).toBe('away')
     expect(next.yardLine).toBe(25)
@@ -97,30 +103,40 @@ describe('applyResolvedPlay scoring & special teams', () => {
 
   it('punt changes field position and possession', () => {
     const s = { ...base, yardLine: 30 }
-    const next = applyResolvedPlay(
-      s,
-      {
-        outcome: 'punt',
-        yardsGained: 0,
-        clockUsed: 12,
-        commentary: 'Punt',
-        puntNetYards: 40,
-      },
-      () => 0.5,
-    )
+    const next = applyResolvedPlay(s, {
+      outcome: 'punt',
+      yardsGained: 0,
+      clockUsed: 12,
+      commentary: 'Punt',
+      puntNetYards: 40,
+    })
     expect(next.possession).toBe('away')
     expect(next.yardLine).toBe(30)
     expect(next.down).toBe(1)
   })
 
   it('interception changes possession', () => {
-    const next = applyResolvedPlay(
-      base,
-      { outcome: 'interception', yardsGained: 0, clockUsed: 10, commentary: 'Pick' },
-      () => 0.99,
-    )
+    const next = applyResolvedPlay(base, {
+      outcome: 'interception',
+      yardsGained: 0,
+      clockUsed: 10,
+      commentary: 'Pick',
+    })
     expect(next.possession).toBe('away')
     expect(next.down).toBe(1)
+    expect(next.yardLine).toBe(75)
+  })
+
+  it('live interception spot controls the next possession spot', () => {
+    const next = applyResolvedPlay(base, {
+      outcome: 'interception',
+      yardsGained: 17,
+      clockUsed: 10,
+      commentary: 'Pick',
+      turnoverYardLine: 42,
+    })
+    expect(next.possession).toBe('away')
+    expect(next.yardLine).toBe(58)
   })
 })
 
@@ -188,6 +204,22 @@ describe('applyRealtimeClock', () => {
     const tick = applyRealtimeClock(s, 5, 'pre_snap_stopped')
     expect(tick.playClockSeconds).toBe(0)
     expect(tick.lastClockEvent).toMatch(/Play clock expired/)
+  })
+
+  it('play clock expiration is explicit and does not silently advance the play', () => {
+    const state = {
+      ...createTestScrimmageState(),
+      playClockSeconds: 0.1,
+      clockMode: 'pre_snap_stopped' as const,
+    }
+
+    const next = applyRealtimeClock(state, 0.2, 'pre_snap_stopped')
+
+    expect(next.playClockSeconds).toBe(0)
+    expect(next.lastClockEvent).toBe('Play clock expired.')
+    expect(next.sessionPhase).toBe('play_calling')
+    expect(next.down).toBe(state.down)
+    expect(next.yardLine).toBe(state.yardLine)
   })
 
   it('Q4 real-time expiration ends the game', () => {

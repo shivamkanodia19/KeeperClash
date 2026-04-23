@@ -6,7 +6,9 @@ import {
   animationSeed,
   createPlayAnimationCore,
   deriveLivePlayResolution,
+  dive,
   moveBallCarrier,
+  juke,
   setPlayerMoveVector,
   snap,
   switchActivePlayer,
@@ -117,6 +119,60 @@ describe('playAnimationMachine', () => {
     expect(core.activePlayerId).toBe(core.ball.carrierId)
   })
 
+  it('screen pass exposes the RB as the live pass target', () => {
+    const engine = createTestScrimmageState()
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'screen_pass', 'cover_3_sky')
+    expect(s0).not.toBeNull()
+    core = s0!.core
+
+    expect(core.ball.throwTargetId).toBe('home_rb')
+
+    const view = toPlayAnimationSnapshot(
+      core,
+      engine,
+      'home',
+      'screen_pass',
+      'cover_3_sky',
+    )
+    expect(view.controllablePlayerIds).toContain('home_rb')
+
+    const targeted = switchActivePlayer(core, 'home_rb', 'offense')
+    expect(targeted).not.toBeNull()
+    expect(targeted!.ball.throwTargetId).toBe('home_rb')
+  })
+
+  it('throwTo target keeps QB control while aiming at the selected receiver', () => {
+    const engine = createTestScrimmageState()
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'quick_slants', 'cover_2_zone')
+    expect(s0).not.toBeNull()
+    core = s0!.core
+    const qbId = core.ball.carrierId
+    const view = toPlayAnimationSnapshot(
+      core,
+      engine,
+      'home',
+      'quick_slants',
+      'cover_2_zone',
+    )
+    const targetId = view.controllablePlayerIds.find(
+      (id) => id !== qbId && id !== core.ball.throwTargetId,
+    )
+    const target = core.players.find((p) => p.id === targetId)
+    expect(target).toBeDefined()
+
+    core = switchActivePlayer(core, target!.id, 'offense')!
+    expect(core.ball.throwTargetId).toBe(target!.id)
+    expect(core.activePlayerId).toBe(core.ball.carrierId)
+    for (let i = 0; i < 60 && core.ball.mode !== 'thrown' && core.phase !== 'tackleOrScore'; i++) {
+      core = advancePlaySimulationFrame(core, 33)!
+    }
+
+    expect(core.ball.throwTargetId).toBe(target!.id)
+    expect(core.activePlayerId === qbId || core.activePlayerId === target!.id).toBe(true)
+  })
+
   it('defensive control can select and steer a defender', () => {
     const engine = {
       ...createTestScrimmageState(),
@@ -145,6 +201,36 @@ describe('playAnimationMachine', () => {
     expect(moved).not.toBeNull()
     expect(moved!.activePlayerId).toBe('home_cb1')
     expect(moved!.players.find((p) => p.id === 'home_cb1')!.y).toBeGreaterThan(startY)
+  })
+
+  it('primary action performs a defensive tackle intent when controlling defense', () => {
+    const engine = {
+      ...createTestScrimmageState(),
+      possession: 'away' as const,
+      userControlledTeam: 'home' as const,
+    }
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'inside_zone', 'cover_2_zone')
+    expect(s0).not.toBeNull()
+    core = switchActivePlayer(s0!.core, 'home_mike', 'defense')!
+    const acted = dive(core)
+    expect(acted).not.toBeNull()
+    expect(acted!.world?.players.find((p) => p.id === 'home_mike')?.tackleIntentTimer).toBeGreaterThan(0)
+  })
+
+  it('secondary action performs a defender shed intent when controlling defense', () => {
+    const engine = {
+      ...createTestScrimmageState(),
+      possession: 'away' as const,
+      userControlledTeam: 'home' as const,
+    }
+    let core = createPlayAnimationCore(engine)
+    const s0 = snap(core, engine, 'inside_zone', 'cover_2_zone')
+    expect(s0).not.toBeNull()
+    core = switchActivePlayer(s0!.core, 'home_mike', 'defense')!
+    const acted = juke(core)
+    expect(acted).not.toBeNull()
+    expect(acted!.world?.players.find((p) => p.id === 'home_mike')?.shedBoostTimer).toBeGreaterThan(0)
   })
 
   it('live play resolution uses the controlled field result instead of the snap script', () => {

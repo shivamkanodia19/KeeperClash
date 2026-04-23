@@ -1,5 +1,6 @@
 import type { OffensiveFormationId, TeamId } from '../footballTypes'
 import { getOffensivePlay } from '../playDefinitions'
+import { OFFENSIVE_PLAY_CONCEPTS } from '../playbook/offenseConcepts'
 import { getDefensiveVisualTemplate } from '../spatial/defensiveVisuals'
 import { slotsForFormation } from '../spatial/offensiveFormations'
 import type { BallFieldState } from './types'
@@ -56,10 +57,36 @@ export function qbIdForTeam(team: TeamId): string {
   return offId(team, 'qb')
 }
 
-export function passReceiverIds(offenseTeam: TeamId, formationId: OffensiveFormationId): readonly string[] {
-  return slotsForFormation(formationId)
-    .filter((s) => /^(wr|slot|te)/.test(s.key))
-    .map((s) => offId(offenseTeam, s.key))
+function defaultReceiverSlot(key: string): boolean {
+  return /^(wr|slot|te)/.test(key)
+}
+
+function routeRoleMatchesSlot(routeRole: string, slotKey: string): boolean {
+  const role = routeRole.toLowerCase().replace(/\s+/g, '')
+  if (role === 'rb' || role.includes('back')) return slotKey === 'rb'
+  if (role === 'fb') return slotKey === 'fb'
+  if (role === 'y' || role.includes('te')) return slotKey.startsWith('te')
+  if (role.includes('slot')) return slotKey.startsWith('slot')
+  if (role === 'x') return slotKey === 'wr1'
+  if (role === 'z') return slotKey === 'wr2' || slotKey === 'wr3'
+  if (role.includes('allwr') || role.includes('wr')) {
+    return slotKey.startsWith('wr') || slotKey.startsWith('slot')
+  }
+  return defaultReceiverSlot(slotKey)
+}
+
+export function passReceiverIds(
+  offenseTeam: TeamId,
+  formationId: OffensiveFormationId,
+  playId?: string | null,
+): readonly string[] {
+  const slots = slotsForFormation(formationId)
+  const routes = playId ? (OFFENSIVE_PLAY_CONCEPTS[playId]?.routes ?? []) : []
+  const routed = routes.length
+    ? slots.filter((s) => routes.some((route) => routeRoleMatchesSlot(route.playerRole, s.key)))
+    : []
+  const receiverSlots = routed.length ? routed : slots.filter((s) => defaultReceiverSlot(s.key))
+  return receiverSlots.map((s) => offId(offenseTeam, s.key))
 }
 
 function lerp(a: number, b: number, t: number): number {

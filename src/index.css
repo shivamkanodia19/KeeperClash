@@ -50,7 +50,7 @@ button {
   height: 100dvh;
   min-height: 100dvh;
   display: grid;
-  grid-template-rows: clamp(54px, 7dvh, 68px) minmax(0, 1fr) clamp(104px, 14dvh, 124px);
+  grid-template-rows: 62px minmax(0, 1fr) minmax(104px, 132px);
   overflow: hidden;
   background: #05070d;
 }
@@ -368,7 +368,8 @@ button {
 .gb-scoreboard {
   display: grid;
   grid-template-columns: minmax(150px, 220px) 1fr minmax(150px, 220px);
-  min-height: 68px;
+  min-height: 62px;
+  height: 62px;
   border-bottom: 4px solid var(--hud-yellow);
   border-top: 4px solid var(--hud-yellow);
   background: #030303;
@@ -434,15 +435,19 @@ button {
 
 .gb-play-area {
   min-height: 0;
+  height: 100%;
   position: relative;
   display: grid;
   place-items: stretch;
 }
 
 .gb-field-frame {
+  --gb-camera-zoom: 1;
+  --gb-visual-zoom: clamp(0.88, var(--gb-camera-zoom), 1.18);
   position: relative;
   overflow: hidden;
   min-height: 0;
+  height: 100%;
   display: grid;
   grid-template-rows: 20px minmax(0, 1fr);
   background: #000;
@@ -619,7 +624,8 @@ button {
   width: 42px;
   height: 52px;
   padding: 0;
-  transform: translate(-50%, -80%);
+  transform: translate(-50%, -80%) scale(var(--gb-visual-zoom));
+  transform-origin: 50% 80%;
   border: 0;
   background: transparent;
   color: #fff;
@@ -642,7 +648,7 @@ button {
   content: "";
   position: absolute;
   inset: -8px;
-  border: 2px dashed var(--hud-yellow);
+  border: 2px dashed rgba(255, 247, 201, 0.82);
   border-radius: 50%;
   animation: gb-blink 0.8s steps(2, end) infinite;
 }
@@ -762,12 +768,70 @@ button {
   filter: drop-shadow(0 0 8px rgba(255, 232, 67, 0.88));
 }
 
+.gb-field-frame--full_field .gb-player,
+.gb-field-frame--tactical_full .gb-player {
+  width: 30px;
+  height: 40px;
+}
+
+.gb-field-frame--full_field .gb-player__body,
+.gb-field-frame--tactical_full .gb-player__body {
+  width: 27px;
+  height: 38px;
+}
+
+.gb-field-frame--full_field .gb-player__helmet,
+.gb-field-frame--tactical_full .gb-player__helmet {
+  width: 18px;
+  height: 12px;
+}
+
+.gb-field-frame--full_field .gb-player__torso,
+.gb-field-frame--tactical_full .gb-player__torso {
+  top: 13px;
+  width: 24px;
+  height: 17px;
+}
+
+.gb-field-frame--full_field .gb-player__legs,
+.gb-field-frame--tactical_full .gb-player__legs {
+  width: 21px;
+  height: 10px;
+}
+
+.gb-field-frame--ball_follow .gb-player {
+  width: 46px;
+  height: 56px;
+}
+
+.gb-field-frame--ball_follow .gb-ball {
+  transform: translate(-50%, -50%) scale(1.18);
+}
+
 .gb-player.is-active::after {
   content: "";
   position: absolute;
   inset: -7px -5px;
   border: 2px solid var(--hud-yellow);
   box-shadow: 0 0 8px rgba(255, 232, 67, 0.75);
+  pointer-events: none;
+}
+
+.gb-player.is-pass-target::before {
+  content: "";
+  position: absolute;
+  inset: -12px -10px;
+  border: 3px dashed var(--hud-cyan);
+  box-shadow: 0 0 10px rgba(57, 233, 255, 0.72);
+  pointer-events: none;
+}
+
+.gb-player.is-selected-defender::before {
+  content: "";
+  position: absolute;
+  inset: -12px -10px;
+  border: 3px dashed var(--hud-red);
+  box-shadow: 0 0 10px rgba(255, 61, 79, 0.7);
   pointer-events: none;
 }
 
@@ -905,7 +969,8 @@ button {
 
 .gb-controls {
   height: 100%;
-  min-height: 0;
+  min-height: 104px;
+  max-height: 132px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 1rem;
